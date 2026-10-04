@@ -2,8 +2,8 @@
 
 A Claude Code plugin that keeps you hydrated. Every hour the Claude critter pops up above the prompt, holding a water bottle, and asks **"Have you drunk water?"**
 
-- **Yes, I drank 💧** — the next reminder comes in an hour.
-- **Not yet** — it asks again in 5 minutes, with a slightly more worried message each time, until you say yes.
+- **Yes, I drank 💧**: the next reminder comes in an hour.
+- **Not yet**: it asks again in 5 minutes, with a slightly more worried message each time, until you say yes.
 
 **Works in the Claude desktop app** (the Code tab) **and in the Claude Code terminal.** In the desktop app the critter is a pixel sprite; in the terminal it's drawn with text characters.
 

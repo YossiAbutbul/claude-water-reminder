@@ -7,6 +7,8 @@ A Claude Code plugin that keeps you hydrated. Every hour the Claude critter pops
 
 **Works in the Claude desktop app** (the Code tab) **and in the Claude Code terminal.** In the desktop app the critter is a pixel sprite; in the terminal it's drawn with text characters.
 
+![water-reminder in the Claude desktop app: the reminder, the reply after answering, and the Windows notification](docs/preview.svg)
+
 On **Windows**, each reminder also shows a system notification with a sound, so you see it even while Claude is minimized.
 
 ## Commands

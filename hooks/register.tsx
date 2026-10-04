@@ -108,7 +108,7 @@ const CRITTER_TEXT = [' ▐▛███▜▌  🧴', '▝▜█████▛�
 // ── Copy ──────────────────────────────────────────────────────────
 const ASKS = [
   'Time for a sip! Have you had some water?',
-  'Gentle nudge — still no water?',
+  'Gentle nudge: still no water?',
   'Your critter is getting worried… water please? 🥺',
   'The bottle is right here. Just one sip! 🙏',
 ]
@@ -170,7 +170,7 @@ async function answer($: EngineInterface, drank: boolean) {
     await update($, reply, () => (isPaused ? cheer : `${cheer} See you in ${minutes(intervalMin)}.`))
     await schedule($, intervalMin * MINUTE)
   } else {
-    await update($, reply, () => (isPaused ? 'OK — reminders are paused.' : `OK — I'll check back in ${minutes(snoozeMin)}. ⏳`))
+    await update($, reply, () => (isPaused ? 'OK, reminders are paused.' : `OK, I'll check back in ${minutes(snoozeMin)}. ⏳`))
     await schedule($, snoozeMin * MINUTE)
   }
   replyTimer?.cancel()
@@ -253,7 +253,7 @@ export const register: Register = on => {
     intervalMin = n
     await $.store.set('intervalMin', n)
     await schedule($, n * MINUTE)
-    return { text: `💧 Reminding every ${minutes(n)}${isPaused ? ' (paused — /water-resume to start)' : ''}.` }
+    return { text: `💧 Reminding every ${minutes(n)}${isPaused ? ' (paused, /water-resume to start)' : ''}.` }
   })
 
   on('command.run', { command: 'water-snooze' }, async ($, e) => {

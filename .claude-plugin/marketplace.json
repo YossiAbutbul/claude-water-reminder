@@ -1,0 +1,12 @@
+{
+  "name": "claude-water-reminder",
+  "owner": { "name": "Yossi Abutbul" },
+  "description": "A Claude Code plugin that reminds you to drink water",
+  "plugins": [
+    {
+      "name": "water-reminder",
+      "source": "./",
+      "description": "The Claude critter asks if you drank water every hour; \"Not yet\" asks again in 5 minutes"
+    }
+  ]
+}

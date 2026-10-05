@@ -555,7 +555,7 @@ function factsSvg(r: Report): Pic {
 }
 
 // ── Timers ────────────────────────────────────────────────────────
-const SYNC_MS = 30 * 1000
+const SYNC_MS = 5 * 1000
 const SLACK_MS = 2000
 
 let timer: Timer | undefined
@@ -630,6 +630,18 @@ async function due($: EngineInterface) {
 
 async function answer($: EngineInterface, drank: boolean) {
   await update($, isAsking, () => false)
+  replyTimer?.cancel()
+  const s = await readShared($)
+  if ((s.answeredAt ?? 0) >= askedAtHere) {
+    // already answered in another session: don't count it twice
+    await update($, nag, () => 0)
+    await update($, reply, () => 'Already answered in another session ✓')
+    if (!isPaused && typeof s.nextAt === 'number') {
+      await arm($, s.nextAt, s.scheduledMs ?? s.nextAt - (await $.clock.now()))
+    }
+    replyTimer = $.clock.after(REPLY_MS, () => void update($, reply, () => null))
+    return
+  }
   await record($, drank, await read($, nag))
   await writeShared($, { answeredAt: await $.clock.now() })
   if (drank) {
@@ -645,7 +657,7 @@ async function answer($: EngineInterface, drank: boolean) {
   replyTimer = $.clock.after(REPLY_MS, () => void update($, reply, () => null))
 }
 
-// Every half minute: take what the other sessions changed
+// Every few seconds: take what the other sessions changed
 async function sync($: EngineInterface) {
   const s = await readShared($)
   await applySettings($, s)

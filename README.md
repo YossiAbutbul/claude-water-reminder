@@ -144,7 +144,7 @@ claude --plugin-dir ./claude-water-reminder
 ## Notes
 
 - Reminders run only while a Claude Code session is open.
-- Open sessions share one schedule: a reminder pops up in all of them at the same time, only one sends the Windows notification, and answering in any session clears the others within half a minute. Settings changed in one session (`/water-every`, `/water-pause`, `/water-mute`…) reach the others the same way.
+- Open sessions share one schedule: a reminder pops up in all of them at the same time, only one sends the Windows notification, and answering in any session clears the others within a few seconds (and is never counted twice). Settings changed in one session (`/water-every`, `/water-pause`, `/water-mute`…) reach the others the same way.
 
 ## License
 

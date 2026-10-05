@@ -1,6 +1,6 @@
 {
   "name": "water-reminder",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "The Claude critter asks if you drank water every hour; \"Not yet\" asks again in 5 minutes",
   "author": { "name": "Yossi Abutbul" },
   "repository": "https://github.com/YossiAbutbul/claude-water-reminder",

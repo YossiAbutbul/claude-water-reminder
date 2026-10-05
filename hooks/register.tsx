@@ -495,6 +495,50 @@ function drinkingSvg(): Pic {
 
 const DRINKING = drinkingSvg()
 
+// ── Dancing critter (/water-version): steps, sways, shakes the bottle ─
+const BEAT = '0.8s' // one step
+const BAR = '1.6s' // left step + right step
+const LEGS_LEFT = new Set(['2,10', '4,10', '2,11', '4,11'])
+const LEGS_RIGHT = new Set(['7,10', '9,10', '7,11', '9,11'])
+
+function danceSvg(): Pic {
+  const W = SPRITE_W + 28
+  const H = SPRITE_H + 26
+  const cells = (pick: (c: string, x: number, y: number) => boolean) =>
+    BODY.flatMap((row, y) => [...row].map((c, x) => (pick(c, x, y) && COLORS[c] ? px(x, y, COLORS[c]) : ''))).join('')
+  const leg = (x: number, y: number) => LEGS_LEFT.has(`${x},${y}`) || LEGS_RIGHT.has(`${x},${y}`)
+  const loop = 'repeatCount="indefinite"'
+  // a pixel music note: head and stem, rising and fading
+  const note = (x: number, delay: string) =>
+    `<g opacity="0" fill="${BLUE}"><rect x="${x}" y="8" width="5" height="4"/><rect x="${x + 3}" y="0" width="2" height="9"/><rect x="${x + 3}" y="0" width="5" height="2"/>` +
+    `<animate attributeName="opacity" values="0;1;0" dur="${BAR}" begin="${delay}" ${loop}/>` +
+    `<animateTransform attributeName="transform" type="translate" values="0 2;0 -12" dur="${BAR}" begin="${delay}" ${loop}/></g>`
+
+  let s = svgOpen(W, H, `-14 -22 ${W} ${H}`).replace('<svg ', '<svg shape-rendering="crispEdges" ')
+  s += note(-12, '0s') + note(SPRITE_W + 4, '0.8s')
+  // everything sways from foot to foot and bounces on every beat
+  s += `<g><animateTransform attributeName="transform" type="rotate" values="-7 ${6 * PX} ${12 * PX};7 ${6 * PX} ${12 * PX};-7 ${6 * PX} ${12 * PX}" dur="${BAR}" ${loop}/>`
+  s += `<g><animateTransform attributeName="transform" type="translate" values="0 0;0 -3;0 0" dur="${BEAT}" ${loop}/>`
+  // legs step in turn: left pair up on the first beat, right pair on the second
+  s += `<g>${[...LEGS_LEFT].map(k => { const [x, y] = k.split(',').map(Number); return px(x, y, COLORS.D) }).join('')}`
+  s += `<animateTransform attributeName="transform" type="translate" values="0 0;0 -4;0 0;0 0;0 0" keyTimes="0;0.25;0.5;0.75;1" dur="${BAR}" ${loop}/></g>`
+  s += `<g>${[...LEGS_RIGHT].map(k => { const [x, y] = k.split(',').map(Number); return px(x, y, COLORS.D) }).join('')}`
+  s += `<animateTransform attributeName="transform" type="translate" values="0 0;0 0;0 0;0 -4;0 0" keyTimes="0;0.25;0.5;0.75;1" dur="${BAR}" ${loop}/></g>`
+  s += cells((c, x, y) => !BOTTLE.has(c) && c !== 'K' && !leg(x, y))
+  // eyes: open, then happy ^ ^ on the second beat
+  s += `<g>${EYES.map(([x, y]) => px(x, y, COLORS.K)).join('')}`
+  s += `<animate attributeName="opacity" values="1;0" calcMode="discrete" dur="${BAR}" ${loop}/></g>`
+  s += `<g opacity="0">${px(2, 5, COLORS.K)}${px(3, 4, COLORS.K)}${px(4, 5, COLORS.K)}${px(7, 5, COLORS.K)}${px(8, 4, COLORS.K)}${px(9, 5, COLORS.K)}`
+  s += `<animate attributeName="opacity" values="0;1" calcMode="discrete" dur="${BAR}" ${loop}/></g>`
+  // the bottle, shaken like a maraca
+  s += `<g><animateTransform attributeName="transform" type="rotate" values="-22 ${15 * PX} ${9 * PX};18 ${15 * PX} ${9 * PX};-22 ${15 * PX} ${9 * PX}" dur="${BEAT}" ${loop}/>`
+  s += cells(c => BOTTLE.has(c))
+  s += '</g></g></g>'
+  return { source: s + '</svg>', width: W, height: H }
+}
+
+const DANCING = danceSvg()
+
 // Plain columns: drank in blue, "Not yet" stacked on top as an outline, today darker
 function dayChartSvg(r: Report): Pic {
   const W = CHART_W
@@ -878,7 +922,7 @@ function drawNote(els: Els, note: Note) {
   if (note.kind === 'about') {
     const critter =
       'Svg' in els ? (
-        <els.Svg source={SPRITE_SVG} alt="Claude critter holding a water bottle" width={SPRITE_W} height={SPRITE_H} isInteractive />
+        <els.Svg source={DANCING.source} alt="Claude critter dancing with its water bottle" width={DANCING.width} height={DANCING.height} isInteractive />
       ) : (
         <Box flexDirection="column">
           {CRITTER_TEXT.map((line, i) => (

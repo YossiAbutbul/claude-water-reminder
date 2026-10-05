@@ -910,7 +910,7 @@ function iconSvg(icon: string, color: string, size: number): string | undefined 
   const small = size < 28
   const [box, tile, stroke] = small ? ['3 3 18 18', 'x="3.4" y="3.4" width="17.2" height="17.2" rx="4.5"', 2.1] : ['0 0 24 24', 'x="0.5" y="0.5" width="23" height="23" rx="6.5"', 1.7]
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="${box}" style="color:${color}">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="${box}" style="color:${color};background:transparent;color-scheme:light dark">${SVG_TRANSPARENT}` +
     `<rect ${tile} fill="${color}" fill-opacity="0.14"/>` +
     `<g fill="none" stroke="currentColor" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round">${glyph}</g>` +
     '</svg>'

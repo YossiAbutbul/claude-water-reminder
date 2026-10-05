@@ -27,6 +27,10 @@ Every answer is logged, and `/water-stats` turns it into a report: the critter t
 
 ![/water-status, /water-version and other command replies in the Claude desktop app](docs/commands.svg)
 
+Replies use the plugin's own icon set, tinted to match the reply and as tall as it (the terminal shows emoji instead):
+
+![water-reminder's icon set: one icon per command, at two-row and one-row sizes](docs/icons.svg)
+
 ## Commands
 
 | Command | What it does |
@@ -39,13 +43,14 @@ Every answer is logged, and `/water-stats` turns it into a report: the critter t
 | `/water-every <minutes>` | Remind every N minutes (default 60) |
 | `/water-snooze <minutes>` | How long "Not yet" waits (default 5) |
 | `/water-goal <glasses>` | Your daily goal, used by the stats and the rank (default 8) |
+| `/water-quiet <from>-<to>` | Quiet hours with no reminders, e.g. `/water-quiet 18:00-09:00`. A reminder that would fall inside them waits until they end. `/water-quiet off` removes them |
 | `/water-mute` | Turn off the notification sound |
 | `/water-unmute` | Turn the notification sound back on |
 | `/water-help` | List all commands and your current settings |
 | `/water-update` | Check GitHub for a newer version and install it (then start a new session) |
 | `/water-version` | Show the version, the author and a link to this repo |
 
-Interval, snooze length, daily goal, pause, mute and your answer history are remembered across sessions. They are kept on your computer only, in `~/.claude/water-reminder/` (`%USERPROFILE%\.claude\water-reminder\` on Windows): `shared.json` for settings and the schedule, `log.json` for your history. Nothing is sent anywhere. Back up that folder if you want to keep your stats when moving to a new computer.
+Interval, snooze length, daily goal, quiet hours, pause, mute and your answer history are remembered across sessions. They are kept on your computer only, in `~/.claude/water-reminder/` (`%USERPROFILE%\.claude\water-reminder\` on Windows): `shared.json` for settings and the schedule, `log.json` for your history. Nothing is sent anywhere. Back up that folder if you want to keep your stats when moving to a new computer.
 
 ## Requirements
 

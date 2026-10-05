@@ -32,7 +32,7 @@ export type Report = {
 }
 
 // How a water command's output row is drawn
-export type Settings = { intervalMin: number; snoozeMin: number; goal: number; paused: boolean; muted: boolean }
+export type Settings = { intervalMin: number; snoozeMin: number; goal: number; quiet: string | null; paused: boolean; muted: boolean }
 export type Note =
   | { kind: 'line'; icon: string; title: string; hint?: string; tone: 'blue' | 'orange' | 'dim' }
   | { kind: 'status'; state: 'scheduled' | 'asking' | 'paused'; at?: string; leftMin?: number; progress?: number; settings: Settings }

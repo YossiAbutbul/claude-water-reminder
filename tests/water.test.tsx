@@ -256,3 +256,87 @@ describe('/water-update', () => {
     expect(w.runs.some(argv => argv.includes('water-reminder@claude-water-reminder'))).toBe(true)
   })
 })
+
+describe('quiet hours', () => {
+  const at = (day: number, hour: number, min = 0) => new Date(2026, 9, day, hour, min).getTime()
+
+  test('/water-quiet sets, shows and clears the window for every session', async ($, on) => {
+    const w = world(on)
+    await startSession($)
+
+    expect(await run($, 'water-quiet', '18:00-09:00')).toContain('Quiet hours: 18:00 to 09:00')
+    expect(w.shared().quiet).toEqual({ start: 18 * 60, end: 9 * 60 })
+    expect(await run($, 'water-quiet')).toContain('18:00 to 09:00')
+    expect(await run($, 'water-status')).toContain('Next reminder')
+
+    expect(await run($, 'water-quiet', 'off')).toContain('Quiet hours off')
+    expect(w.shared().quiet).toBe(null)
+  })
+
+  test('/water-quiet rejects anything that is not a window', async ($, on) => {
+    world(on)
+    await startSession($)
+    for (const bad of ['18', '25-9', '18:60-9', '9-9', 'evening']) {
+      expect(await run($, 'water-quiet', bad)).toContain('Usage')
+    }
+  })
+
+  test('setting quiet hours moves a reminder already inside them to their end', async ($, on) => {
+    const w = world(on)
+    await startSession($) // next reminder at 13:00
+    await run($, 'water-quiet', '12:30-14')
+
+    expect(w.shared().nextAt).toBe(at(5, 14))
+  })
+
+  test('an answer whose next reminder lands in quiet hours waits for them to end', async ($, on) => {
+    const w = world(on, sharedFile({ ...SETTINGS, quiet: { start: 12 * 60 + 30, end: 14 * 60 } }))
+    await startSession($)
+    await run($, 'water')
+    await pressInBand($, 'yes')
+
+    expect(w.shared().nextAt).toBe(at(5, 14))
+  })
+
+  test('a window across midnight pushes an evening reminder to the next morning', async ($, on) => {
+    const w = world(on, sharedFile({ ...SETTINGS, quiet: { start: 18 * 60, end: 9 * 60 } }))
+    await startSession($)
+    await run($, 'water-every', '420') // 12:00 + 7 h = 19:00, inside the window
+
+    expect(w.shared().nextAt).toBe(at(6, 9))
+  })
+
+  test('quiet hours set in another session hold a reminder that comes due inside them', async ($, on) => {
+    const w = world(on)
+    await startSession($) // next reminder at 13:00
+    w.setShared({ quiet: { start: 12 * 60 + 30, end: 14 * 60 } })
+
+    await w.clock.advance(61 * MINUTE + 2000)
+    expect(await asking($)).toBe(false)
+    expect(w.notifications()).toBe(0)
+    expect(w.shared().nextAt).toBe(at(5, 14))
+
+    await w.clock.advance(60 * MINUTE)
+    expect(await asking($)).toBe(true)
+    expect(w.notifications()).toBe(1)
+  })
+})
+
+describe('reply rows', () => {
+  const row = ($: Engine, surface: 'terminal' | 'desktop', command: string, text: string) =>
+    $.ui.mount({ plugin: PLUGIN, surface, component: 'CommandOutput', props: { command, args: '', text, isErrored: false } })
+
+  test('replies draw their own SVG icon on desktop and text in the terminal', async ($, on) => {
+    world(on)
+    await startSession($)
+    const text = await run($, 'water-pause')
+
+    const desktop = await row($, 'desktop', 'water-pause', text)
+    expect(await desktop.find({ type: 'Svg' })).toBeDefined()
+    expect(await desktop.find({ text: 'Reminders paused' })).toBeDefined()
+
+    const terminal = await row($, 'terminal', 'water-pause', text)
+    expect(await terminal.find({ type: 'Svg' })).toBeUndefined()
+    expect(await terminal.find({ text: 'Reminders paused' })).toBeDefined()
+  })
+})

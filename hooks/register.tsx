@@ -132,6 +132,42 @@ let intervalMin = DEFAULT_INTERVAL_MIN
 let snoozeMin = DEFAULT_SNOOZE_MIN
 let isPaused = false
 let goal = DEFAULT_GOAL
+// Quiet hours as minutes after midnight, or null when off; start > end spans midnight
+let quiet: { start: number; end: number } | null = null
+
+function clockLabel(min: number): string {
+  return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
+}
+
+function quietLabel(q: { start: number; end: number }): string {
+  return `${clockLabel(q.start)} to ${clockLabel(q.end)}`
+}
+
+function isQuiet(t: number): boolean {
+  if (!quiet) return false
+  const d = new Date(t)
+  const m = d.getHours() * 60 + d.getMinutes()
+  return quiet.start < quiet.end ? m >= quiet.start && m < quiet.end : m >= quiet.start || m < quiet.end
+}
+
+// The first moment at or after `t` outside quiet hours
+function afterQuiet(t: number): number {
+  if (!quiet || !isQuiet(t)) return t
+  const d = new Date(t)
+  const end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), Math.floor(quiet.end / 60), quiet.end % 60).getTime()
+  return end > t ? end : new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, Math.floor(quiet.end / 60), quiet.end % 60).getTime()
+}
+
+// "18:00-09:00", "18-9", "6:30 - 8" → minutes after midnight; undefined when not a window
+function parseQuiet(args: string): { start: number; end: number } | undefined {
+  const m = /^(\d{1,2})(?::(\d{2}))?\s*-\s*(\d{1,2})(?::(\d{2}))?$/.exec(args.trim())
+  if (!m) return undefined
+  const [h1, m1, h2, m2] = [Number(m[1]), Number(m[2] ?? 0), Number(m[3]), Number(m[4] ?? 0)]
+  if (h1 > 23 || h2 > 23 || m1 > 59 || m2 > 59) return undefined
+  const start = h1 * 60 + m1
+  const end = h2 * 60 + m2
+  return start === end ? undefined : { start, end }
+}
 
 function minutes(n: number): string {
   if (n % 60 === 0) {
@@ -156,6 +192,7 @@ type Shared = {
   paused?: boolean
   muted?: boolean
   goal?: number
+  quiet?: { start: number; end: number } | null
   nextAt?: number | null // when the next question is due, null while paused or asking
   scheduledMs?: number // how long that wait was, for the status bar
   askedAt?: number // the latest question, from any session
@@ -195,7 +232,7 @@ async function writeShared($: EngineInterface, patch: Shared): Promise<Shared> {
 
 // This session's settings, as every session should see them
 async function saveSettings($: EngineInterface) {
-  await writeShared($, { intervalMin, snoozeMin, goal, paused: isPaused, muted: await read($, isMuted) })
+  await writeShared($, { intervalMin, snoozeMin, goal, quiet, paused: isPaused, muted: await read($, isMuted) })
 }
 
 // Takes another session's settings
@@ -203,6 +240,7 @@ async function applySettings($: EngineInterface, s: Shared) {
   if (typeof s.intervalMin === 'number') intervalMin = s.intervalMin
   if (typeof s.snoozeMin === 'number') snoozeMin = s.snoozeMin
   if (typeof s.goal === 'number') goal = s.goal
+  if (s.quiet !== undefined) quiet = s.quiet
   isPaused = s.paused === true
   if ((await read($, isMuted)) !== (s.muted === true)) {
     await update($, isMuted, () => s.muted === true)
@@ -606,9 +644,11 @@ async function schedule($: EngineInterface, ms: number) {
     await writeShared($, { nextAt: null })
     return
   }
-  const at = (await $.clock.now()) + ms
-  await writeShared($, { nextAt: at, scheduledMs: ms })
-  await arm($, at, ms)
+  const now = await $.clock.now()
+  // a reminder that would land in quiet hours waits for them to end
+  const at = afterQuiet(now + ms)
+  await writeShared($, { nextAt: at, scheduledMs: at - now })
+  await arm($, at, at - now)
 }
 
 // This session's timer went off: ask, unless another session moved the schedule
@@ -623,6 +663,13 @@ async function due($: EngineInterface) {
   }
   if (typeof s.nextAt === 'number' && s.nextAt > now + SLACK_MS) {
     await arm($, s.nextAt, s.scheduledMs ?? s.nextAt - now)
+    return
+  }
+  if (isQuiet(now)) {
+    // quiet hours began after this reminder was set: hold it until they end
+    const at = afterQuiet(now)
+    await writeShared($, { nextAt: at, scheduledMs: at - now })
+    await arm($, at, at - now)
     return
   }
   const pending = (s.askedAt ?? 0) > (s.answeredAt ?? 0)
@@ -690,7 +737,7 @@ async function sync($: EngineInterface) {
 }
 
 // Starts this session from the shared schedule
-async function start($: EngineInterface) {
+async function startSchedule($: EngineInterface) {
   let s = await readShared($)
   if (typeof s.intervalMin !== 'number') {
     // first run with shared files: carry over this copy's own settings
@@ -751,9 +798,43 @@ function firstLine(text: string): string {
   return text.split('\n').map(l => l.trim()).find(Boolean) ?? ''
 }
 
+// ── Icons ─────────────────────────────────────────────────────────
+// One style for every reply: a softly tinted tile with a line glyph in the
+// reply's colour, drawn on a 24-unit grid. Keyed by the emoji the terminal
+// shows in their place.
+const GLYPHS: Record<string, string> = {
+  '💧': '<path d="M12 5c2.8 3.4 4.8 6 4.8 8.6a4.8 4.8 0 0 1-9.6 0C7.2 11 9.2 8.4 12 5z" fill="currentColor" fill-opacity="0.25"/>',
+  '⏸️': '<path d="M9.5 8v8M14.5 8v8"/>',
+  '▶️': '<path d="M9.5 7.5v9l7-4.5z" fill="currentColor" fill-opacity="0.25"/>',
+  '🕒': '<circle cx="12" cy="12" r="6"/><path d="M12 8.6V12l2.4 1.6"/>',
+  '⏳': '<path d="M8.5 6h7M8.5 18h7M9.2 6.2c0 3.6 5.6 3.4 5.6 5.8s-5.6 2.2-5.6 5.8M14.8 6.2c0 3.6-5.6 3.4-5.6 5.8s5.6 2.2 5.6 5.8"/>',
+  '⚠️': '<path d="M12 6.2l6.4 11.3H5.6z"/><path d="M12 10.6v3"/><circle cx="12" cy="15.6" r="0.6" fill="currentColor"/>',
+  '🔇': '<path d="M6.5 10h2.4L12.5 7v10l-3.6-3H6.5z"/><path d="M15.2 10l3.6 4M18.8 10l-3.6 4"/>',
+  '🔊': '<path d="M6.5 10h2.4L12.5 7v10l-3.6-3H6.5z"/><path d="M15.4 9.8a3.2 3.2 0 0 1 0 4.4M17.4 8a6 6 0 0 1 0 8"/>',
+  '🌙': '<path d="M16.2 14.6A5.6 5.6 0 0 1 9.4 7.8a5.6 5.6 0 1 0 6.8 6.8z"/>',
+  '🎯': '<circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2.6"/><circle cx="12" cy="12" r="0.6" fill="currentColor"/>',
+  '✅': '<circle cx="12" cy="12" r="6"/><path d="M9.4 12.2l1.8 1.8 3.6-3.8"/>',
+  '⬆️': '<path d="M12 17V7.5M8.2 11.2L12 7.4l3.8 3.8"/>',
+}
+
+// `size` in CSS pixels: about one row for a one-line reply, two for title + hint
+function iconSvg(icon: string, color: string, size: number): string | undefined {
+  const glyph = GLYPHS[icon]
+  if (!glyph) return undefined
+  // at one row, zoom in on the glyph and thicken it so it stays legible
+  const small = size < 28
+  const [box, tile, stroke] = small ? ['3 3 18 18', 'x="3.4" y="3.4" width="17.2" height="17.2" rx="4.5"', 2.1] : ['0 0 24 24', 'x="0.5" y="0.5" width="23" height="23" rx="6.5"', 1.7]
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="${box}" style="color:${color}">` +
+    `<rect ${tile} fill="${color}" fill-opacity="0.14"/>` +
+    `<g fill="none" stroke="currentColor" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round">${glyph}</g>` +
+    '</svg>'
+  )
+}
+
 // ── Command output rows ───────────────────────────────────────────
 async function settings($: EngineInterface): Promise<Settings> {
-  return { intervalMin, snoozeMin, goal, paused: isPaused, muted: await read($, isMuted) }
+  return { intervalMin, snoozeMin, goal, quiet: quiet ? quietLabel(quiet) : null, paused: isPaused, muted: await read($, isMuted) }
 }
 
 // Answers a command with `text` (what the model reads, and the fallback row)
@@ -768,7 +849,7 @@ function noteFor(all: Record<string, Note>, text: string): Note | undefined {
 }
 
 function settingsLine(s: Settings): string {
-  return `every ${minutes(s.intervalMin)} · "not yet" waits ${minutes(s.snoozeMin)} · goal ${s.goal} a day · sound ${s.muted ? 'off' : 'on'}${s.paused ? ' · paused' : ''}`
+  return `every ${minutes(s.intervalMin)} · "not yet" waits ${minutes(s.snoozeMin)} · goal ${s.goal} a day${s.quiet ? ` · quiet ${s.quiet}` : ''} · sound ${s.muted ? 'off' : 'on'}${s.paused ? ' · paused' : ''}`
 }
 
 type Els = ReturnType<EngineInterface['ui']['resolve']>
@@ -778,9 +859,12 @@ function drawNote(els: Els, note: Note) {
   const tone = (t: 'blue' | 'orange' | 'dim') => (t === 'blue' ? BLUE : t === 'orange' ? ORANGE : INK)
 
   if (note.kind === 'line') {
+    // the icon spans the reply's rows: two with a hint, one without
+    const size = note.hint ? 38 : 20
+    const svg = iconSvg(note.icon, tone(note.tone), size)
     return (
-      <Box key="water-note" flexDirection="row" gap={1} paddingY={0}>
-        <Text>{note.icon}</Text>
+      <Box key="water-note" flexDirection="row" gap={1} alignItems="center" paddingY={0}>
+        {svg && 'Svg' in els ? <els.Svg source={svg} alt={note.icon} width={size} height={size} /> : <Text>{note.icon}</Text>}
         <Box flexDirection="column">
           <Text bold color={tone(note.tone)}>
             {note.title}
@@ -907,6 +991,11 @@ export const register: Register = on => {
       argumentHint: '[days]',
     })
     await $.command.register({
+      name: 'water-quiet',
+      description: 'Set quiet hours with no reminders, e.g. 18:00-09:00, or off',
+      argumentHint: '<from>-<to> | off',
+    })
+    await $.command.register({
       name: 'water-goal',
       description: 'Set how many glasses a day you aim for',
       argumentHint: '<glasses>',
@@ -917,7 +1006,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'water-update', description: 'Check for a new water-reminder version and install it' })
     await $.command.register({ name: 'water-version', description: 'Show the water-reminder version, its author and repo' })
 
-    await start($)
+    await startSchedule($)
     return next(e)
   })
 
@@ -1056,6 +1145,58 @@ export const register: Register = on => {
       icon: '🎯',
       title: `Daily goal: ${n} glasses`,
       hint: `≈ ${((n * GLASS_ML) / 1000).toFixed(1)} L a day · ${drank} so far today`,
+      tone: 'blue',
+    })
+  })
+
+  on('command.run', { command: 'water-quiet' }, async ($, e) => {
+    const args = e.args.trim().toLowerCase()
+    if (args === '') {
+      return say($, quiet ? `🌙 Quiet hours: ${quietLabel(quiet)}.` : '🌙 No quiet hours set.', {
+        kind: 'line',
+        icon: '🌙',
+        title: quiet ? `Quiet hours: ${quietLabel(quiet)}` : 'No quiet hours set',
+        hint: quiet ? '/water-quiet off to remove them' : 'e.g. /water-quiet 18:00-09:00',
+        tone: quiet ? 'blue' : 'dim',
+      })
+    }
+    if (args === 'off') {
+      quiet = null
+      await saveSettings($)
+      return say($, '🌙 Quiet hours off: reminders all day.', {
+        kind: 'line',
+        icon: '🌙',
+        title: 'Quiet hours off',
+        hint: 'Reminders come all day again',
+        tone: 'dim',
+      })
+    }
+    const window = parseQuiet(args)
+    if (!window) {
+      return say($, 'Usage: /water-quiet <from>-<to>, e.g. /water-quiet 18:00-09:00, or /water-quiet off', {
+        kind: 'line',
+        icon: '⚠️',
+        title: 'Which hours should be quiet?',
+        hint: 'e.g. /water-quiet 18:00-09:00 · /water-quiet 22-7 · /water-quiet off',
+        tone: 'orange',
+      })
+    }
+    quiet = window
+    await saveSettings($)
+    // a reminder already set inside the new window moves to its end
+    const s = await readShared($)
+    const now = await $.clock.now()
+    if (!isPaused && typeof s.nextAt === 'number' && isQuiet(s.nextAt)) {
+      const at = afterQuiet(s.nextAt)
+      await writeShared($, { nextAt: at, scheduledMs: at - now })
+      await arm($, at, at - now)
+    }
+    const label = quietLabel(window)
+    return say($, `🌙 Quiet hours: ${label}. No reminders then.`, {
+      kind: 'line',
+      icon: '🌙',
+      title: `Quiet hours: ${label}`,
+      hint: 'No reminders then · /water-quiet off to remove',
       tone: 'blue',
     })
   })
@@ -1209,13 +1350,14 @@ export const register: Register = on => {
         '| `/water-every <minutes>` | How often to remind |',
         '| `/water-snooze <minutes>` | How long "Not yet" waits |',
         '| `/water-goal <glasses>` | Your daily goal (default 8) |',
+        '| `/water-quiet <from>-<to>` · `off` | No reminders between those times, e.g. 18:00-09:00 |',
         '| `/water-pause` · `/water-resume` | Stop or restart reminders |',
         '| `/water-mute` · `/water-unmute` | Notification sound off or on |',
         '| `/water-update` | Check for a new version and install it |',
         '| `/water-version` | Version, author and repo |',
         '| `/water-help` | This list |',
         '',
-        `Now: every ${minutes(intervalMin)} · "Not yet" waits ${minutes(snoozeMin)} · goal ${goal} a day · ${isPaused ? 'paused' : 'running'} · sound ${muted ? 'off' : 'on'}`,
+        `Now: every ${minutes(intervalMin)} · "Not yet" waits ${minutes(snoozeMin)} · goal ${goal} a day · ${quiet ? `quiet ${quietLabel(quiet)}` : 'no quiet hours'} · ${isPaused ? 'paused' : 'running'} · sound ${muted ? 'off' : 'on'}`,
       ].join('\n'),
     }
   })

@@ -2,6 +2,14 @@
 
 All notable changes to water-reminder. Versions follow [semantic versioning](https://semver.org): the version in `.claude-plugin/plugin.json` is what `/water-version` shows and what `/water-update` compares against. Each version is tagged in git (`v0.4.1` and so on).
 
+## [0.6.0] - 2026-10-05
+
+### Added
+- `/water-quiet <from>-<to>`: quiet hours with no reminders, such as `18:00-09:00` (windows across midnight work, `22-7` is short for `22:00-07:00`). A reminder or a "Not yet" that would land inside them waits until they end. `/water-quiet` shows them, `/water-quiet off` removes them. Shared by every session. `/water` still asks right away.
+
+### Changed
+- Command replies in the desktop app use the plugin's own icon set instead of Windows emoji: one style, tinted to match the reply, as tall as the reply (two rows beside a title and a hint, one row beside a single line). The terminal keeps the emoji.
+
 ## [0.5.0] - 2026-10-05
 
 ### Added
@@ -58,6 +66,7 @@ All notable changes to water-reminder. Versions follow [semantic versioning](htt
 - First release: the Claude critter asks "Have you drunk water?" above the prompt every hour, "Not yet" asks again after 5 minutes, and Windows shows a system notification with a sound.
 - `/water`, `/water-status`, `/water-pause`, `/water-resume`, `/water-every`, `/water-snooze`, `/water-mute`, `/water-unmute`.
 
+[0.6.0]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.3.0...v0.4.0

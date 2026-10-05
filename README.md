@@ -11,6 +11,22 @@ A Claude Code plugin that keeps you hydrated. Every hour the Claude critter pops
 
 On **Windows**, each reminder also shows a system notification with a sound, so you see it even while Claude is minimized.
 
+## Features
+
+### Hydration stats
+
+Every answer is logged, and `/water-stats` turns it into a report: the critter takes a swig while you read, glasses per day (the outline on top of a bar is the times you pressed "Not yet"), what hours you drink at, and an "at a glance" panel with your peak hour, best day, streaks and trend. Your rank goes from 🌵 Cactus to 🐋 Blue Whale.
+
+![/water-stats in the Claude desktop app: the drinking critter, daily and hourly charts, and the at-a-glance panel](docs/stats.svg)
+
+`/water-stats 30` shows the last 30 days (anything from 1 to 90). In the terminal the same report is drawn with text bars.
+
+### Status, version and every other command
+
+`/water-status` shows a countdown to the next water break with a progress bar. `/water-version` shows the version, who made it and a link here. The other commands answer with a short line that says what changed.
+
+![/water-status, /water-version and other command replies in the Claude desktop app](docs/commands.svg)
+
 ## Commands
 
 | Command | What it does |
@@ -28,7 +44,7 @@ On **Windows**, each reminder also shows a system notification with a sound, so 
 | `/water-update` | Check GitHub for a newer version and install it (then start a new session) |
 | `/water-version` | Show the version, the author and a link to this repo |
 
-Interval, snooze length, pause, mute and your answer history are remembered across sessions.
+Interval, snooze length, pause, mute and your answer history are remembered across sessions. They are kept on your computer only, in a JSON file under `~/.claude/plugins/store/` (`%USERPROFILE%\.claude\plugins\store\` on Windows). Nothing is sent anywhere. Back up that folder if you want to keep your stats when moving to a new computer.
 
 ## Requirements
 
@@ -87,6 +103,10 @@ You should see when the next reminder is due. Then run `/water` to see the critt
 
 ## Updating
 
+From version 0.3.0 on, type `/water-update` in any session: it checks this repo for a newer version, installs it, and tells you to start a new session.
+
+You can also update from a terminal:
+
 ```bash
 claude plugin marketplace update claude-water-reminder
 claude plugin update water-reminder@claude-water-reminder
@@ -101,7 +121,7 @@ claude plugin uninstall water-reminder@claude-water-reminder
 claude plugin marketplace remove claude-water-reminder
 ```
 
-Your saved settings (interval, snooze, mute) are discarded with it.
+Your settings and drinking history stay in `~/.claude/plugins/store/`. To remove them too, delete the files there whose names start with `water-reminder_`.
 
 ## Troubleshooting
 
@@ -128,4 +148,4 @@ claude --plugin-dir ./claude-water-reminder
 
 ## License
 
-MIT
+MIT © 2026 Yossi Abutbul. See [LICENSE](LICENSE).

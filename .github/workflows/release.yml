@@ -1,0 +1,65 @@
+# Publishes a GitHub Release for every version tag, with that version's
+# section of CHANGELOG.md as its notes. Runs on GitHub; nothing to install.
+#
+# - Pushing a tag like v0.5.0 creates (or refreshes) that release.
+# - "Run workflow" in the Actions tab refreshes every tag's release.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Publish releases from CHANGELOG.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          # The CHANGELOG section for one version: from "## [x.y.z]" to the next "## ["
+          notes() {
+            awk -v head="## [$1]" '
+              { sub(/\r$/, "") }
+              index($0, head) == 1 { on = 1; next }
+              on && (index($0, "## [") == 1 || $0 ~ /^\[[0-9.]+\]: /) { exit }
+              on { print }
+            ' CHANGELOG.md
+          }
+
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            tags=$(git tag --list 'v*' --sort=version:refname)
+          else
+            tags="$TAG"
+          fi
+          newest=$(git tag --list 'v*' --sort=-version:refname | head -n1)
+
+          for tag in $tags; do
+            version="${tag#v}"
+            notes "$version" > notes.md
+            if [ ! -s notes.md ]; then
+              echo "No CHANGELOG section for $version" > notes.md
+            fi
+
+            latest="--latest=false"
+            if [ "$tag" = "$newest" ]; then latest="--latest"; fi
+
+            if gh release view "$tag" > /dev/null 2>&1; then
+              gh release edit "$tag" --title "$tag" --notes-file notes.md $latest
+            else
+              gh release create "$tag" --title "$tag" --notes-file notes.md --verify-tag $latest
+            fi
+            echo "Published $tag"
+          done

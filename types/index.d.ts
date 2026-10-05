@@ -35,6 +35,7 @@ export type Settings = { intervalMin: number; snoozeMin: number; paused: boolean
 export type Note =
   | { kind: 'line'; icon: string; title: string; hint?: string; tone: 'blue' | 'orange' | 'dim' }
   | { kind: 'status'; state: 'scheduled' | 'asking' | 'paused'; at?: string; leftMin?: number; progress?: number; settings: Settings }
+  | { kind: 'about'; version: string; author: string; repo: string; copyright: string }
 
 declare module 'claude-code' {
   interface PluginState {

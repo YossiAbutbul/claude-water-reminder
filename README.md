@@ -26,6 +26,7 @@ On **Windows**, each reminder also shows a system notification with a sound, so 
 | `/water-unmute` | Turn the notification sound back on |
 | `/water-help` | List all commands and your current settings |
 | `/water-update` | Check GitHub for a newer version and install it (then start a new session) |
+| `/water-version` | Show the version, the author and a link to this repo |
 
 Interval, snooze length, pause, mute and your answer history are remembered across sessions.
 

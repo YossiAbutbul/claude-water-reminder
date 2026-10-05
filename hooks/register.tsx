@@ -504,7 +504,6 @@ async function ask($: EngineInterface) {
   await update($, isAsking, () => true)
   // a write from a timer can miss the band's redraw while a turn is streaming
   $.ui.invalidate('ui.render')
-  $.ui.toast('💧 Water break! Answer just above the prompt.')
   const script = notifyScript(await read($, isMuted))
   void $.process
     .run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodeCommand(script)])
@@ -609,6 +608,40 @@ function drawNote(els: Els, note: Note) {
     )
   }
 
+  if (note.kind === 'about') {
+    const critter =
+      'Svg' in els ? (
+        <els.Svg source={SPRITE_SVG} alt="Claude critter holding a water bottle" width={SPRITE_W} height={SPRITE_H} isInteractive />
+      ) : (
+        <Box flexDirection="column">
+          {CRITTER_TEXT.map((line, i) => (
+            <Text key={`c${i}`} color={ORANGE}>
+              {line}
+            </Text>
+          ))}
+        </Box>
+      )
+    const link = note.repo.replace(/^https?:\/\//, '')
+    return (
+      <Box key="water-note" flexDirection="row" gap={2} alignItems="center" paddingY={1}>
+        {critter}
+        <Box flexDirection="column">
+          <Box flexDirection="row" gap={1}>
+            <Text bold color={BLUE}>
+              water-reminder
+            </Text>
+            <Text dimColor>v{note.version}</Text>
+          </Box>
+          <Text>
+            made by <Text bold color={ORANGE}>{note.author}</Text>
+          </Text>
+          {'Markdown' in els ? <els.Markdown key="repo" text={`[${link}](${note.repo})`} dimColor /> : <Text dimColor>{note.repo}</Text>}
+          <Text dimColor>{note.copyright}</Text>
+        </Box>
+      </Box>
+    )
+  }
+
   // status
   {
     const BAR = 28
@@ -663,6 +696,12 @@ function drawNote(els: Els, note: Note) {
   }
 }
 
+async function redrawIfAsking($: EngineInterface) {
+  if (await read($, isAsking)) {
+    $.ui.invalidate('ui.render')
+  }
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'water', description: 'Ask the water question now' })
@@ -688,6 +727,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'water-unmute', description: 'Turn on the water reminder sound' })
     await $.command.register({ name: 'water-help', description: 'List the water reminder commands' })
     await $.command.register({ name: 'water-update', description: 'Check for a new water-reminder version and install it' })
+    await $.command.register({ name: 'water-version', description: 'Show the water-reminder version, its author and repo' })
 
     const storedInterval = await $.store.get('intervalMin')
     const storedSnooze = await $.store.get('snoozeMin')
@@ -702,11 +742,6 @@ export const register: Register = on => {
   })
 
   // keep a pending question on screen however the turn around it goes
-  const redrawIfAsking = async ($: EngineInterface) => {
-    if (await read($, isAsking)) {
-      $.ui.invalidate('ui.render')
-    }
-  }
   on('turn.start', async ($, e, next) => {
     await redrawIfAsking($)
     return next(e)
@@ -968,6 +1003,7 @@ export const register: Register = on => {
         '| `/water-pause` · `/water-resume` | Stop or restart reminders |',
         '| `/water-mute` · `/water-unmute` | Notification sound off or on |',
         '| `/water-update` | Check for a new version and install it |',
+        '| `/water-version` | Version, author and repo |',
         '| `/water-help` | This list |',
         '',
         `Now: every ${minutes(intervalMin)} · "Not yet" waits ${minutes(snoozeMin)} · ${isPaused ? 'paused' : 'running'} · sound ${muted ? 'off' : 'on'}`,
@@ -1027,6 +1063,27 @@ export const register: Register = on => {
       title: `Updated: v${current} → v${latest}`,
       hint: 'Start a new session to use it',
       tone: 'blue',
+    })
+  })
+
+  on('command.run', { command: 'water-version' }, async $ => {
+    let manifest: { version?: string; author?: { name?: string }; repository?: string; license?: string } = {}
+    try {
+      manifest = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`))
+    } catch {
+      // unreadable manifest: show what we can
+    }
+    const version = manifest.version ?? 'unknown'
+    const author = manifest.author?.name ?? 'Yossi Abutbul'
+    const repo = manifest.repository ?? 'https://github.com/YossiAbutbul/claude-water-reminder'
+    const license = manifest.license ?? 'MIT'
+    const copyright = `© 2026 ${author} · ${license} License`
+    return say($, `💧 water-reminder v${version}\nMade by ${author}\n${repo}\n${copyright}`, {
+      kind: 'about',
+      version,
+      author,
+      repo,
+      copyright,
     })
   })
 

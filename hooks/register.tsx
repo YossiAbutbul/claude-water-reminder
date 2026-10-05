@@ -6,6 +6,7 @@ import type { DayRow, Note, Rank, Report, Settings } from '../types'
 const MINUTE = 60 * 1000
 const DEFAULT_INTERVAL_MIN = 60
 const DEFAULT_SNOOZE_MIN = 5
+const DEFAULT_GOAL = 8 // glasses a day
 const REPLY_MS = 5000
 
 const ORANGE = '#D97757'
@@ -130,6 +131,7 @@ const YES_REPLIES = ['Nice! 💧', 'Hydrated & happy! ✨', 'Great job! Your cri
 let intervalMin = DEFAULT_INTERVAL_MIN
 let snoozeMin = DEFAULT_SNOOZE_MIN
 let isPaused = false
+let goal = DEFAULT_GOAL
 
 function minutes(n: number): string {
   if (n % 60 === 0) {
@@ -153,6 +155,7 @@ type Shared = {
   snoozeMin?: number
   paused?: boolean
   muted?: boolean
+  goal?: number
   nextAt?: number | null // when the next question is due, null while paused or asking
   scheduledMs?: number // how long that wait was, for the status bar
   askedAt?: number // the latest question, from any session
@@ -192,13 +195,14 @@ async function writeShared($: EngineInterface, patch: Shared): Promise<Shared> {
 
 // This session's settings, as every session should see them
 async function saveSettings($: EngineInterface) {
-  await writeShared($, { intervalMin, snoozeMin, paused: isPaused, muted: await read($, isMuted) })
+  await writeShared($, { intervalMin, snoozeMin, goal, paused: isPaused, muted: await read($, isMuted) })
 }
 
 // Takes another session's settings
 async function applySettings($: EngineInterface, s: Shared) {
   if (typeof s.intervalMin === 'number') intervalMin = s.intervalMin
   if (typeof s.snoozeMin === 'number') snoozeMin = s.snoozeMin
+  if (typeof s.goal === 'number') goal = s.goal
   isPaused = s.paused === true
   if ((await read($, isMuted)) !== (s.muted === true)) {
     await update($, isMuted, () => s.muted === true)
@@ -214,7 +218,6 @@ const DAY = 24 * 60 * MINUTE
 const SPARK = '▁▂▃▄▅▆▇█'
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const FULL_DAYS = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays']
-const GOAL = 8 // glasses a day
 const GLASS_ML = 250
 
 async function readLog($: EngineInterface): Promise<LogEntry[]> {
@@ -249,16 +252,17 @@ function since(min: number): string {
   return `${Math.floor(min / (24 * 60))} days ago`
 }
 
-function rankFor(drinks: number, perDay: number): Rank {
+function rankFor(drinks: number, perDay: number, goal: number): Rank {
+  const share = perDay / goal
   if (drinks === 0) return { emoji: '🌵', name: 'Cactus', blurb: 'no sips logged yet' }
-  if (perDay >= 8) return { emoji: '🐋', name: 'Blue Whale', blurb: 'legendary hydration' }
-  if (perDay >= 6) return { emoji: '🐬', name: 'Dolphin', blurb: 'swimming in it' }
-  if (perDay >= 4) return { emoji: '🐟', name: 'Fish', blurb: 'solid and steady' }
-  if (perDay >= 2) return { emoji: '🐸', name: 'Frog', blurb: 'getting there' }
+  if (share >= 1) return { emoji: '🐋', name: 'Blue Whale', blurb: 'legendary hydration' }
+  if (share >= 0.75) return { emoji: '🐬', name: 'Dolphin', blurb: 'swimming in it' }
+  if (share >= 0.5) return { emoji: '🐟', name: 'Fish', blurb: 'solid and steady' }
+  if (share >= 0.25) return { emoji: '🐸', name: 'Frog', blurb: 'getting there' }
   return { emoji: '🐪', name: 'Camel', blurb: 'running on reserves' }
 }
 
-function buildReport(log: LogEntry[], now: number, days: number): Report {
+function buildReport(log: LogEntry[], now: number, days: number, goal: number): Report {
   const today = new Date(now)
   const dayAt = (i: number) => new Date(today.getFullYear(), today.getMonth(), today.getDate() - i)
 
@@ -328,6 +332,7 @@ function buildReport(log: LogEntry[], now: number, days: number): Report {
 
   return {
     days,
+    goal,
     range: days === 1 ? 'today' : `${first.getDate()}/${first.getMonth() + 1} to ${today.getDate()}/${today.getMonth() + 1}`,
     rows,
     hours,
@@ -348,7 +353,7 @@ function buildReport(log: LogEntry[], now: number, days: number): Report {
     bestDay: drinks > 0 ? FULL_DAYS[byWeekday.indexOf(Math.max(...byWeekday))] : null,
     snoozeHour: skips > 0 ? hourLabel(skipsByHour.indexOf(Math.max(...skipsByHour))) : null,
     snoozesPerSip: drinks > 0 && skips > 0 ? (skips / drinks).toFixed(1) : null,
-    rank: rankFor(windowDrinks, perDay),
+    rank: rankFor(windowDrinks, perDay, goal),
   }
 }
 
@@ -381,7 +386,7 @@ function reportText(r: Report): string {
     `### 💧 Hydration report · ${r.range}`,
     `**${r.rank.emoji} ${r.rank.name}**: ${r.rank.blurb}`,
     '',
-    `**Today** ${r.today.drinks}/${GOAL} glasses · **Streak** 🔥 ${r.streak} · **Yes rate** ${r.yesRate ?? '-'}% · **Water** ≈ ${r.litres.toFixed(1)} L`,
+    `**Today** ${r.today.drinks}/${r.goal} glasses · **Streak** 🔥 ${r.streak} · **Yes rate** ${r.yesRate ?? '-'}% · **Water** ≈ ${r.litres.toFixed(1)} L`,
     '',
     '```',
     ...chart,
@@ -466,10 +471,10 @@ function dayChartSvg(r: Report): Pic {
   const base = H - bottom
   const every = Math.ceil(n / 8)
   let s = svgOpen(W, H)
-  if (GOAL <= most) {
-    const gy = base - y(GOAL)
+  if (r.goal <= most) {
+    const gy = base - y(r.goal)
     s += `<line x1="0" x2="${W}" y1="${gy}" y2="${gy}" stroke="${INK}" stroke-opacity="0.5" stroke-dasharray="2 3"/>`
-    s += `<text x="${W}" y="${gy - 3}" text-anchor="end" font-size="9" fill="${INK}">goal ${GOAL}</text>`
+    s += `<text x="${W}" y="${gy - 3}" text-anchor="end" font-size="9" fill="${INK}">goal ${r.goal}</text>`
   }
   r.rows.forEach((x, i) => {
     const cx = i * slot + slot / 2
@@ -748,7 +753,7 @@ function firstLine(text: string): string {
 
 // ── Command output rows ───────────────────────────────────────────
 async function settings($: EngineInterface): Promise<Settings> {
-  return { intervalMin, snoozeMin, paused: isPaused, muted: await read($, isMuted) }
+  return { intervalMin, snoozeMin, goal, paused: isPaused, muted: await read($, isMuted) }
 }
 
 // Answers a command with `text` (what the model reads, and the fallback row)
@@ -763,7 +768,7 @@ function noteFor(all: Record<string, Note>, text: string): Note | undefined {
 }
 
 function settingsLine(s: Settings): string {
-  return `every ${minutes(s.intervalMin)} · "not yet" waits ${minutes(s.snoozeMin)} · sound ${s.muted ? 'off' : 'on'}${s.paused ? ' · paused' : ''}`
+  return `every ${minutes(s.intervalMin)} · "not yet" waits ${minutes(s.snoozeMin)} · goal ${s.goal} a day · sound ${s.muted ? 'off' : 'on'}${s.paused ? ' · paused' : ''}`
 }
 
 type Els = ReturnType<EngineInterface['ui']['resolve']>
@@ -901,6 +906,11 @@ export const register: Register = on => {
       description: 'Chart and analysis of your water history',
       argumentHint: '[days]',
     })
+    await $.command.register({
+      name: 'water-goal',
+      description: 'Set how many glasses a day you aim for',
+      argumentHint: '<glasses>',
+    })
     await $.command.register({ name: 'water-mute', description: 'Turn off the water reminder sound' })
     await $.command.register({ name: 'water-unmute', description: 'Turn on the water reminder sound' })
     await $.command.register({ name: 'water-help', description: 'List the water reminder commands' })
@@ -1026,6 +1036,30 @@ export const register: Register = on => {
     })
   })
 
+  on('command.run', { command: 'water-goal' }, async ($, e) => {
+    const n = Number(e.args.trim())
+    if (!Number.isInteger(n) || n < 1 || n > 30) {
+      return say($, `Usage: /water-goal <glasses>, e.g. /water-goal 10 (1 to 30, now ${goal})`, {
+        kind: 'line',
+        icon: '⚠️',
+        title: 'How many glasses a day?',
+        hint: `e.g. /water-goal 10 · 1 to 30 · now ${goal}`,
+        tone: 'orange',
+      })
+    }
+    goal = n
+    await saveSettings($)
+    const today = dayKey(await $.clock.now())
+    const drank = (await readLog($)).filter(x => x.d && dayKey(x.t) === today).length
+    return say($, `🎯 Daily goal: ${n} glasses (≈ ${((n * GLASS_ML) / 1000).toFixed(1)} L). ${drank} so far today.`, {
+      kind: 'line',
+      icon: '🎯',
+      title: `Daily goal: ${n} glasses`,
+      hint: `≈ ${((n * GLASS_ML) / 1000).toFixed(1)} L a day · ${drank} so far today`,
+      tone: 'blue',
+    })
+  })
+
   on('command.run', { command: 'water-stats' }, async ($, e) => {
     const n = e.args.trim() === '' ? 7 : Number(e.args.trim())
     if (!Number.isInteger(n) || n < 1 || n > 90) {
@@ -1047,7 +1081,7 @@ export const register: Register = on => {
         tone: 'blue',
       })
     }
-    const report = buildReport(log, await $.clock.now(), n)
+    const report = buildReport(log, await $.clock.now(), n, goal)
     const text = reportText(report)
     // keep the last few so their rows still draw as cards
     await update($, reports, all => Object.fromEntries([...Object.entries(all), [text, report]].slice(-20)))
@@ -1119,7 +1153,7 @@ export const register: Register = on => {
           <Box flexDirection="column">
             <Text bold>Hydration · {r.days === 1 ? 'today' : `last ${r.days} days`}</Text>
             <Text dimColor>
-              {r.today.drinks} of {GOAL} glasses today{r.lastSip ? `, last one ${r.lastSip}` : ''} · rank: {r.rank.name.toLowerCase()} {r.rank.emoji}
+              {r.today.drinks} of {r.goal} glasses today{r.lastSip ? `, last one ${r.lastSip}` : ''} · rank: {r.rank.name.toLowerCase()} {r.rank.emoji}
             </Text>
           </Box>
         </Box>
@@ -1174,13 +1208,14 @@ export const register: Register = on => {
         '| `/water-stats [days]` | Charts and analysis of your history (default 7 days, up to 90) |',
         '| `/water-every <minutes>` | How often to remind |',
         '| `/water-snooze <minutes>` | How long "Not yet" waits |',
+        '| `/water-goal <glasses>` | Your daily goal (default 8) |',
         '| `/water-pause` · `/water-resume` | Stop or restart reminders |',
         '| `/water-mute` · `/water-unmute` | Notification sound off or on |',
         '| `/water-update` | Check for a new version and install it |',
         '| `/water-version` | Version, author and repo |',
         '| `/water-help` | This list |',
         '',
-        `Now: every ${minutes(intervalMin)} · "Not yet" waits ${minutes(snoozeMin)} · ${isPaused ? 'paused' : 'running'} · sound ${muted ? 'off' : 'on'}`,
+        `Now: every ${minutes(intervalMin)} · "Not yet" waits ${minutes(snoozeMin)} · goal ${goal} a day · ${isPaused ? 'paused' : 'running'} · sound ${muted ? 'off' : 'on'}`,
       ].join('\n'),
     }
   })

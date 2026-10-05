@@ -2,6 +2,12 @@
 
 All notable changes to water-reminder. Versions follow [semantic versioning](https://semver.org): the version in `.claude-plugin/plugin.json` is what `/water-version` shows and what `/water-update` compares against. Each version is tagged in git (`v0.4.1` and so on).
 
+## [0.5.0] - 2026-10-05
+
+### Added
+- `/water-goal <glasses>`: set your daily goal (1 to 30, default 8). It's shared by every session, and the stats card, its goal line and your rank use it. The rank now measures your daily average against your goal.
+- Automated tests (`claude plugin test .`) for the shared schedule, answers across sessions, the goal, the stats and `/water-update`.
+
 ## [0.4.1] - 2026-10-05
 
 ### Fixed
@@ -52,6 +58,7 @@ All notable changes to water-reminder. Versions follow [semantic versioning](htt
 - First release: the Claude critter asks "Have you drunk water?" above the prompt every hour, "Not yet" asks again after 5 minutes, and Windows shows a system notification with a sound.
 - `/water`, `/water-status`, `/water-pause`, `/water-resume`, `/water-every`, `/water-snooze`, `/water-mute`, `/water-unmute`.
 
+[0.5.0]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.2.0...v0.3.0

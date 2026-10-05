@@ -7,6 +7,7 @@ export type DayRow = { label: string; drinks: number; skips: number; isToday: bo
 // One /water-stats run, kept so its transcript row can be drawn as a card
 export type Report = {
   days: number
+  goal: number
   range: string
   rows: DayRow[]
   hours: number[]
@@ -31,7 +32,7 @@ export type Report = {
 }
 
 // How a water command's output row is drawn
-export type Settings = { intervalMin: number; snoozeMin: number; paused: boolean; muted: boolean }
+export type Settings = { intervalMin: number; snoozeMin: number; goal: number; paused: boolean; muted: boolean }
 export type Note =
   | { kind: 'line'; icon: string; title: string; hint?: string; tone: 'blue' | 'orange' | 'dim' }
   | { kind: 'status'; state: 'scheduled' | 'asking' | 'paused'; at?: string; leftMin?: number; progress?: number; settings: Settings }

@@ -38,13 +38,14 @@ Every answer is logged, and `/water-stats` turns it into a report: the critter t
 | `/water-resume` | Resume reminders |
 | `/water-every <minutes>` | Remind every N minutes (default 60) |
 | `/water-snooze <minutes>` | How long "Not yet" waits (default 5) |
+| `/water-goal <glasses>` | Your daily goal, used by the stats and the rank (default 8) |
 | `/water-mute` | Turn off the notification sound |
 | `/water-unmute` | Turn the notification sound back on |
 | `/water-help` | List all commands and your current settings |
 | `/water-update` | Check GitHub for a newer version and install it (then start a new session) |
 | `/water-version` | Show the version, the author and a link to this repo |
 
-Interval, snooze length, pause, mute and your answer history are remembered across sessions. They are kept on your computer only, in `~/.claude/water-reminder/` (`%USERPROFILE%\.claude\water-reminder\` on Windows): `shared.json` for settings and the schedule, `log.json` for your history. Nothing is sent anywhere. Back up that folder if you want to keep your stats when moving to a new computer.
+Interval, snooze length, daily goal, pause, mute and your answer history are remembered across sessions. They are kept on your computer only, in `~/.claude/water-reminder/` (`%USERPROFILE%\.claude\water-reminder\` on Windows): `shared.json` for settings and the schedule, `log.json` for your history. Nothing is sent anywhere. Back up that folder if you want to keep your stats when moving to a new computer.
 
 ## Requirements
 
@@ -145,6 +146,14 @@ claude --plugin-dir ./claude-water-reminder
 
 - Reminders run only while a Claude Code session is open.
 - Open sessions share one schedule: a reminder pops up in all of them at the same time, only one sends the Windows notification, and answering in any session clears the others within a few seconds (and is never counted twice). Settings changed in one session (`/water-every`, `/water-pause`, `/water-mute`…) reach the others the same way.
+
+## Development
+
+The tests load the real plugin against an in-memory folder and a fake clock, so they never touch your settings, send notifications or call GitHub. Run them with Claude Code 2.1.286 or newer:
+
+```bash
+claude plugin test .
+```
 
 ## Versions
 

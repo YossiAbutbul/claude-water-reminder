@@ -1,0 +1,258 @@
+// Run with: claude plugin test .   (tests/*.test.tsx)
+// Each test loads the real plugin against an in-memory shared folder, a
+// mocked clock and stubbed notifications / network, so nothing on disk,
+// no Windows toast and no GitHub call is touched.
+import { describe, expect, mock, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
+import type { On } from 'claude-code'
+
+const PLUGIN = 'water-reminder'
+const DIR = '/cfg/water-reminder'
+const MINUTE = 60 * 1000
+// Monday 5 Oct 2026, noon
+const NOW = new Date(2026, 9, 5, 12, 0).getTime()
+
+type Shared = Record<string, unknown>
+
+// The world beneath the plugin: files, processes, network, clock, env, store
+function world(on: On, files: Record<string, string> = {}, opts: { latest?: string } = {}) {
+  const fs = new Map(Object.entries(files))
+  const runs: string[][] = []
+  // the engine hands paths over absolute (C:/cfg/...): key them without the drive
+  const norm = (p: string) => p.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '')
+
+  // these hooks stand for the engine, so they answer { value } or { deny }
+  on('fs.read', (_$, e) => {
+    const path = norm(e.path)
+    if (path.endsWith('/.claude-plugin/plugin.json')) {
+      return { value: JSON.stringify({ name: PLUGIN, version: '0.5.0', author: { name: 'Yossi Abutbul' }, license: 'MIT' }) }
+    }
+    const text = fs.get(path)
+    return text === undefined ? { deny: `ENOENT ${path}` } : { value: text }
+  })
+  on('fs.write', (_$, e) => {
+    fs.set(norm(e.path), e.text)
+    return { value: undefined }
+  })
+  on('process.run', (_$, e) => {
+    runs.push([...e.argv])
+    return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('http.fetch', () => ({
+    value:
+      opts.latest === undefined
+        ? { status: 404, ok: false, headers: {}, text: '' }
+        : { status: 200, ok: true, headers: {}, text: JSON.stringify({ version: opts.latest }) },
+  }))
+  // the engine's own band when the plugin has nothing to show: empty
+  on('ui.render', ($, e) => {
+    const { Box } = $.ui.resolve(e)
+    return <Box key="engine" />
+  })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { CLAUDE_CONFIG_DIR: '/cfg' })
+  mock.store(on)
+
+  return {
+    fs,
+    runs,
+    clock,
+    notifications: () => runs.filter(argv => argv[0] === 'powershell.exe').length,
+    shared: (): Shared => JSON.parse(fs.get(`${DIR}/shared.json`) ?? '{}'),
+    setShared: (patch: Shared) => fs.set(`${DIR}/shared.json`, JSON.stringify({ ...JSON.parse(fs.get(`${DIR}/shared.json`) ?? '{}'), ...patch })),
+    log: (): { t: number; d: boolean; n: number }[] => JSON.parse(fs.get(`${DIR}/log.json`) ?? '[]'),
+  }
+}
+
+const sharedFile = (s: Shared) => ({ [`${DIR}/shared.json`]: JSON.stringify(s) })
+const SETTINGS = { intervalMin: 60, snoozeMin: 5, goal: 8, paused: false, muted: false }
+
+async function startSession($: Engine) {
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+}
+
+// The band above the prompt, as the terminal draws it now
+async function band($: Engine) {
+  return $.ui.mount({
+    plugin: PLUGIN,
+    surface: 'terminal',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 100, scroll: { offset: 0, bodyRows: 19 }, view: {} },
+  })
+}
+
+// True while the band shows the question (its "Yes" button)
+async function asking($: Engine): Promise<boolean> {
+  return (await (await band($)).find({ key: 'yes' })) !== undefined
+}
+
+async function run($: Engine, command: string, args = ''): Promise<string> {
+  return (await $.command.run({ command, args })).text ?? ''
+}
+
+async function pressInBand($: Engine, key: 'yes' | 'no') {
+  await (await band($)).press({ key })
+}
+
+describe('schedule', () => {
+  test('the first reminder comes after the interval, with one notification', async ($, on) => {
+    const w = world(on)
+    await startSession($)
+    expect(w.shared().nextAt).toBe(NOW + 60 * MINUTE)
+
+    await w.clock.advance(59 * MINUTE)
+    expect(await asking($)).toBe(false)
+
+    await w.clock.advance(MINUTE + 2000)
+    expect(await asking($)).toBe(true)
+    expect(w.notifications()).toBe(1)
+  })
+
+  test('a new session joins the schedule another session set', async ($, on) => {
+    const w = world(on, sharedFile({ ...SETTINGS, nextAt: NOW + 10 * MINUTE, scheduledMs: 60 * MINUTE }))
+    await startSession($)
+
+    await w.clock.advance(10 * MINUTE + 2000)
+    expect(await asking($)).toBe(true)
+  })
+
+  test('when another session already sent the notification, the band shows without a second one', async ($, on) => {
+    const w = world(on, sharedFile({ ...SETTINGS, nextAt: NOW + MINUTE, scheduledMs: MINUTE }))
+    await startSession($)
+    // the other session's timer went off first and claimed this round
+    w.setShared({ askedAt: NOW + MINUTE, notifiedAt: NOW + MINUTE, nextAt: null })
+
+    await w.clock.advance(MINUTE + 2000)
+    expect(await asking($)).toBe(true)
+    expect(w.notifications()).toBe(0)
+  })
+
+  test('/water-every moves the shared schedule', async ($, on) => {
+    const w = world(on)
+    await startSession($)
+    await run($, 'water-every', '45')
+
+    expect(w.shared().intervalMin).toBe(45)
+    expect(w.shared().nextAt).toBe(NOW + 45 * MINUTE)
+  })
+
+  test('a pause from another session stops reminders here', async ($, on) => {
+    const w = world(on)
+    await startSession($)
+    w.setShared({ paused: true, nextAt: null })
+
+    await w.clock.advance(61 * MINUTE)
+    expect(await asking($)).toBe(false)
+    expect(w.notifications()).toBe(0)
+  })
+})
+
+describe('answers', () => {
+  test('"Yes" is logged once and sets the next reminder an interval away', async ($, on) => {
+    const w = world(on)
+    await startSession($)
+    await run($, 'water')
+    await pressInBand($, 'yes')
+
+    expect(w.log()).toHaveLength(1)
+    expect(w.log()[0]?.d).toBe(true)
+    expect(w.shared().nextAt).toBe(NOW + 60 * MINUTE)
+    expect(await asking($)).toBe(false)
+  })
+
+  test('"Not yet" is logged and asks again after the snooze', async ($, on) => {
+    const w = world(on)
+    await startSession($)
+    await run($, 'water')
+    await pressInBand($, 'no')
+
+    expect(w.log()[0]?.d).toBe(false)
+    expect(w.shared().nextAt).toBe(NOW + 5 * MINUTE)
+  })
+
+  test('an answer in another session clears the band here within seconds', async ($, on) => {
+    const w = world(on)
+    await startSession($)
+    await run($, 'water')
+    expect(await asking($)).toBe(true)
+
+    w.setShared({ answeredAt: NOW + 1000, nextAt: NOW + 60 * MINUTE })
+    await w.clock.advance(6000)
+    expect(await asking($)).toBe(false)
+  })
+
+  test('answering after another session already answered is not counted twice', async ($, on) => {
+    const w = world(on)
+    await startSession($)
+    await run($, 'water')
+    w.setShared({ answeredAt: NOW + 1, nextAt: NOW + 60 * MINUTE })
+
+    await pressInBand($, 'yes')
+    expect(w.log()).toHaveLength(0)
+    expect(await (await band($)).find({ text: /Already answered/ })).toBeDefined()
+  })
+})
+
+describe('goal and stats', () => {
+  test('/water-goal saves the goal for every session', async ($, on) => {
+    const w = world(on)
+    await startSession($)
+
+    expect(await run($, 'water-goal', '10')).toContain('Daily goal: 10 glasses')
+    expect(w.shared().goal).toBe(10)
+  })
+
+  test('/water-goal rejects anything but 1 to 30', async ($, on) => {
+    const w = world(on)
+    await startSession($)
+
+    for (const bad of ['0', '31', 'abc', '']) {
+      expect(await run($, 'water-goal', bad)).toContain('Usage')
+    }
+    expect(w.shared().goal).toBe(8)
+  })
+
+  test('/water-stats counts today against the goal and the streak across days', async ($, on) => {
+    const day = (ago: number, hour: number) => new Date(2026, 9, 5 - ago, hour).getTime()
+    const log = [
+      { t: day(2, 9), d: true, n: 1 },
+      { t: day(1, 9), d: true, n: 1 },
+      { t: day(1, 10), d: false, n: 1 },
+      { t: day(0, 9), d: true, n: 1 },
+      { t: day(0, 10), d: true, n: 2 },
+    ]
+    world(on, { ...sharedFile({ ...SETTINGS, goal: 4 }), [`${DIR}/log.json`]: JSON.stringify(log) })
+    await startSession($)
+
+    const text = await run($, 'water-stats', '7')
+    expect(text).toContain('**Today** 2/4 glasses')
+    expect(text).toContain('**Streak** 🔥 3')
+    expect(text).toContain('**Yes rate** 80%')
+  })
+
+  test('/water-stats with no history says so', async ($, on) => {
+    world(on)
+    await startSession($)
+    expect(await run($, 'water-stats')).toContain('No water history yet')
+  })
+})
+
+describe('/water-update', () => {
+  test('says up to date when GitHub has the same version', async ($, on) => {
+    const w = world(on, {}, { latest: '0.5.0' })
+    await startSession($)
+
+    expect(await run($, 'water-update')).toContain('up to date')
+    expect(w.runs.some(argv => argv.includes('update'))).toBe(false)
+  })
+
+  test('installs a newer version through claude plugin update', async ($, on) => {
+    const w = world(on, {}, { latest: '0.10.0' })
+    await startSession($)
+
+    expect(await run($, 'water-update')).toContain('v0.5.0 → v0.10.0')
+    expect(w.runs.some(argv => argv.includes('water-reminder@claude-water-reminder'))).toBe(true)
+  })
+})

@@ -845,20 +845,61 @@ function firstLine(text: string): string {
 // ── Icons ─────────────────────────────────────────────────────────
 // One style for every reply: a softly tinted tile with a line glyph in the
 // reply's colour, drawn on a 24-unit grid. Keyed by the emoji the terminal
-// shows in their place.
+// shows in their place. Every glyph keeps moving while it is on screen.
+
+const EASE = '0.45 0 0.55 1'
+
+// One looping animation of `attr`; eased in and out unless `calc` says otherwise
+function anim(attr: string, values: (string | number)[], dur: number, opts: { begin?: number; calc?: 'linear' | 'discrete'; keyTimes?: number[] } = {}): string {
+  const tag = attr === 'translate' || attr === 'rotate' || attr === 'scale' ? `animateTransform attributeName="transform" type="${attr}"` : `animate attributeName="${attr}"`
+  const steps = opts.calc === 'discrete' ? values.length : values.length - 1
+  const keyTimes = opts.keyTimes ?? values.map((_, i) => +(i / steps).toFixed(4))
+  const timing = opts.calc ? `calcMode="${opts.calc}"` : `calcMode="spline" keySplines="${Array(values.length - 1).fill(EASE).join(';')}"`
+  return `<${tag} values="${values.join(';')}" keyTimes="${keyTimes.join(';')}" ${timing} dur="${dur}s"${opts.begin ? ` begin="${opts.begin}s"` : ''} repeatCount="indefinite"/>`
+}
+
+const SPEAKER = '<path d="M6.5 10h2.4L12.5 7v10l-3.6-3H6.5z"/>'
+const TICKS = Array.from({ length: 12 }, (_, i) => `${i * 30} 12 12`)
+
 const GLYPHS: Record<string, string> = {
-  '💧': '<path d="M12 5c2.8 3.4 4.8 6 4.8 8.6a4.8 4.8 0 0 1-9.6 0C7.2 11 9.2 8.4 12 5z" fill="currentColor" fill-opacity="0.25"/>',
-  '⏸️': '<path d="M9.5 8v8M14.5 8v8"/>',
-  '▶️': '<path d="M9.5 7.5v9l7-4.5z" fill="currentColor" fill-opacity="0.25"/>',
-  '🕒': '<circle cx="12" cy="12" r="6"/><path d="M12 8.6V12l2.4 1.6"/>',
-  '⏳': '<path d="M8.5 6h7M8.5 18h7M9.2 6.2c0 3.6 5.6 3.4 5.6 5.8s-5.6 2.2-5.6 5.8M14.8 6.2c0 3.6-5.6 3.4-5.6 5.8s5.6 2.2 5.6 5.8"/>',
-  '⚠️': '<path d="M12 6.2l6.4 11.3H5.6z"/><path d="M12 10.6v3"/><circle cx="12" cy="15.6" r="0.6" fill="currentColor"/>',
-  '🔇': '<path d="M6.5 10h2.4L12.5 7v10l-3.6-3H6.5z"/><path d="M15.2 10l3.6 4M18.8 10l-3.6 4"/>',
-  '🔊': '<path d="M6.5 10h2.4L12.5 7v10l-3.6-3H6.5z"/><path d="M15.4 9.8a3.2 3.2 0 0 1 0 4.4M17.4 8a6 6 0 0 1 0 8"/>',
-  '🌙': '<path d="M17.5 13.3A5.6 5.6 0 0 1 10.7 6.5a5.6 5.6 0 1 0 6.8 6.8z"/>',
-  '🎯': '<circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2.6"/><circle cx="12" cy="12" r="0.6" fill="currentColor"/>',
-  '✅': '<circle cx="12" cy="12" r="6"/><path d="M9.4 12.2l1.8 1.8 3.6-3.8"/>',
-  '⬆️': '<path d="M12 17V7.5M8.2 11.2L12 7.4l3.8 3.8"/>',
+  // the drop bobs and keeps sending ripples out beneath it
+  '💧':
+    `<ellipse cx="12" cy="19.4" rx="1" ry="0.4" stroke-width="1.2">${anim('rx', [1, 6.5], 1.8)}${anim('ry', [0.4, 1.5], 1.8)}${anim('opacity', [0.9, 0], 1.8)}</ellipse>` +
+    `<path d="M12 5c2.8 3.4 4.8 6 4.8 8.6a4.8 4.8 0 0 1-9.6 0C7.2 11 9.2 8.4 12 5z" fill="currentColor" fill-opacity="0.25">${anim('translate', ['0 0', '0 -1.4', '0 0'], 1.8)}</path>`,
+  // standby light: the sign slowly shrinks, dims and comes back
+  '⏸️': `<g transform="translate(12 12)"><g>${anim('scale', [1, 0.82, 1], 2.6)}${anim('opacity', [1, 0.45, 1], 2.6)}<path d="M-2.5 -4v8M2.5 -4v8"/></g></g>`,
+  // a ring spins around the play sign: running again
+  '▶️':
+    `<circle cx="12" cy="12" r="8" stroke-width="1.3" stroke-dasharray="14 36.3">${anim('rotate', ['0 12 12', '360 12 12'], 1.4, { calc: 'linear' })}</circle>` +
+    `<path d="M10.2 8.6v6.8l5.3-3.4z" fill="currentColor" fill-opacity="0.25"/>`,
+  // a ticking clock: the minute hand jumps each second, the hour hand creeps
+  '🕒':
+    `<circle cx="12" cy="12" r="7"/>` +
+    `<path d="M12 12h2.8">${anim('rotate', ['0 12 12', '360 12 12'], 72, { calc: 'linear' })}</path>` +
+    `<path d="M12 12V7.6">${anim('rotate', TICKS, 12, { calc: 'discrete' })}</path>` +
+    `<circle cx="12" cy="12" r="0.7" fill="currentColor"/>`,
+  // the hourglass flips, waits, flips again
+  '⏳': `<g>${anim('rotate', ['0 12 12', '0 12 12', '180 12 12'], 2, { keyTimes: [0, 0.7, 1] })}<path d="M8.5 6h7M8.5 18h7M9.2 6.2c0 3.6 5.6 3.4 5.6 5.8s-5.6 2.2-5.6 5.8M14.8 6.2c0 3.6-5.6 3.4-5.6 5.8s5.6 2.2 5.6 5.8"/></g>`,
+  // the sign wobbles and the dot blinks
+  '⚠️': `<g>${anim('rotate', ['-5 12 17', '5 12 17', '-5 12 17'], 0.9)}<path d="M12 6.2l6.4 11.3H5.6z"/><path d="M12 10.6v3"/><circle cx="12" cy="15.6" r="0.6" fill="currentColor">${anim('opacity', [1, 0.2, 1], 0.9)}</circle></g>`,
+  // the cross fades in and out
+  '🔇': `${SPEAKER}<path d="M15.2 10l3.6 4M18.8 10l-3.6 4">${anim('opacity', [1, 0.25, 1], 1.6)}</path>`,
+  // the waves pulse outward, one after the other
+  '🔊': `${SPEAKER}<path d="M15.4 9.8a3.2 3.2 0 0 1 0 4.4">${anim('opacity', [0.25, 1, 0.25], 1.2)}</path><path d="M17.4 8a6 6 0 0 1 0 8">${anim('opacity', [0.25, 1, 0.25], 1.2, { begin: 0.3 })}</path>`,
+  // the moon sways and its star twinkles
+  '🌙':
+    `<path d="M17.5 13.3A5.6 5.6 0 0 1 10.7 6.5a5.6 5.6 0 1 0 6.8 6.8z">${anim('rotate', ['-8 12 12', '8 12 12', '-8 12 12'], 3.2)}</path>` +
+    `<path d="M17.2 5.6v2.4M16 6.8h2.4" stroke-width="1.2">${anim('opacity', [1, 0.15, 1], 1.4)}</path>`,
+  // a ring keeps rippling out from the bullseye
+  '🎯':
+    `<circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2.6"/><circle cx="12" cy="12" r="0.6" fill="currentColor"/>` +
+    `<circle cx="12" cy="12" r="2.6" stroke-width="1">${anim('r', [2.6, 9], 1.6)}${anim('opacity', [0.9, 0], 1.6)}</circle>`,
+  // the tick draws itself over and over
+  '✅':
+    `<circle cx="12" cy="12" r="6">${anim('r', [6, 6.5, 6], 2, { keyTimes: [0, 0.3, 1] })}</circle>` +
+    `<path d="M9.4 12.2l1.8 1.8 3.6-3.8" pathLength="1" stroke-dasharray="1">${anim('stroke-dashoffset', [1, 0, 0, 1], 2, { keyTimes: [0, 0.3, 0.85, 1] })}</path>`,
+  // the arrow keeps flying up through the tile
+  '⬆️': `<path d="M12 17V7.5M8.2 11.2L12 7.4l3.8 3.8">${anim('translate', ['0 4', '0 -4'], 1.3, { calc: 'linear' })}${anim('opacity', [0, 1, 1, 0], 1.3, { keyTimes: [0, 0.3, 0.7, 1], calc: 'linear' })}</path>`,
 }
 
 // `size` in CSS pixels: about one row for a one-line reply, two for title + hint
@@ -908,7 +949,7 @@ function drawNote(els: Els, note: Note) {
     const svg = iconSvg(note.icon, tone(note.tone), size)
     return (
       <Box key="water-note" flexDirection="row" gap={1} alignItems="center" paddingY={0}>
-        {svg && 'Svg' in els ? <els.Svg source={svg} alt={note.icon} width={size} height={size} /> : <Text>{note.icon}</Text>}
+        {svg && 'Svg' in els ? <els.Svg source={svg} alt={note.icon} width={size} height={size} isInteractive /> : <Text>{note.icon}</Text>}
         <Box flexDirection="column">
           <Text bold color={tone(note.tone)}>
             {note.title}

@@ -27,7 +27,7 @@ Every answer is logged, and `/water-stats` turns it into a report: the critter t
 
 ![/water-status, /water-version and other command replies in the Claude desktop app](docs/commands.svg)
 
-Replies use the plugin's own icon set, tinted to match the reply and as tall as it (the terminal shows emoji instead):
+Replies use the plugin's own animated icon set, tinted to match the reply and as tall as it. Each icon keeps moving while it is on screen (the terminal shows emoji instead):
 
 ![water-reminder's icon set: one icon per command, at two-row and one-row sizes](docs/icons.svg)
 

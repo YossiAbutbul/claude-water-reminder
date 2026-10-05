@@ -2,6 +2,13 @@
 
 All notable changes to water-reminder. Versions follow [semantic versioning](https://semver.org): the version in `.claude-plugin/plugin.json` is what `/water-version` shows and what `/water-update` compares against. Each version is tagged in git (`v0.4.1` and so on).
 
+## [0.7.0] - 2026-10-05
+
+### Changed
+- Every reply icon in the desktop app is animated and keeps moving while it is on screen: the drop bobs and ripples, the clock ticks, the hourglass flips, the moon sways under a twinkling star, the sound waves pulse, the target ripples, the tick redraws itself, the arrow flies up and the warning sign wobbles.
+- New icons for `/water-every` (a clock face whose minute hand ticks), `/water-pause` (a pause sign that breathes like a standby light) and `/water-resume` (a play sign with a spinning ring).
+- The README's icon and command images show the animated icons.
+
 ## [0.6.2] - 2026-10-05
 
 ### Fixed
@@ -80,6 +87,7 @@ All notable changes to water-reminder. Versions follow [semantic versioning](htt
 - First release: the Claude critter asks "Have you drunk water?" above the prompt every hour, "Not yet" asks again after 5 minutes, and Windows shows a system notification with a sound.
 - `/water`, `/water-status`, `/water-pause`, `/water-resume`, `/water-every`, `/water-snooze`, `/water-mute`, `/water-unmute`.
 
+[0.7.0]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.5.0...v0.6.0

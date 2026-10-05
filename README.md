@@ -31,6 +31,8 @@ Replies use the plugin's own icon set, tinted to match the reply and as tall as 
 
 ![water-reminder's icon set: one icon per command, at two-row and one-row sizes](docs/icons.svg)
 
+A reply with a hint line gets a two-row icon. For example, `/water-quiet 18:00-09:00` answers **Quiet hours: 18:00 to 09:00** with *No reminders then · /water-quiet off to remove* below it. A one-line reply, such as `/water-snooze 10` → **"Not yet" now waits 10 minutes**, gets a one-row icon.
+
 ## Commands
 
 | Command | What it does |

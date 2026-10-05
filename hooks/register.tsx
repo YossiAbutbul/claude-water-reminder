@@ -855,7 +855,7 @@ const GLYPHS: Record<string, string> = {
   '⚠️': '<path d="M12 6.2l6.4 11.3H5.6z"/><path d="M12 10.6v3"/><circle cx="12" cy="15.6" r="0.6" fill="currentColor"/>',
   '🔇': '<path d="M6.5 10h2.4L12.5 7v10l-3.6-3H6.5z"/><path d="M15.2 10l3.6 4M18.8 10l-3.6 4"/>',
   '🔊': '<path d="M6.5 10h2.4L12.5 7v10l-3.6-3H6.5z"/><path d="M15.4 9.8a3.2 3.2 0 0 1 0 4.4M17.4 8a6 6 0 0 1 0 8"/>',
-  '🌙': '<path d="M16.2 14.6A5.6 5.6 0 0 1 9.4 7.8a5.6 5.6 0 1 0 6.8 6.8z"/>',
+  '🌙': '<path d="M17.5 13.3A5.6 5.6 0 0 1 10.7 6.5a5.6 5.6 0 1 0 6.8 6.8z"/>',
   '🎯': '<circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2.6"/><circle cx="12" cy="12" r="0.6" fill="currentColor"/>',
   '✅': '<circle cx="12" cy="12" r="6"/><path d="M9.4 12.2l1.8 1.8 3.6-3.8"/>',
   '⬆️': '<path d="M12 17V7.5M8.2 11.2L12 7.4l3.8 3.8"/>',

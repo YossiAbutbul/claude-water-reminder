@@ -126,7 +126,7 @@ const ASKS = [
 ]
 const YES_REPLIES = ['Nice! 💧', 'Hydrated & happy! ✨', 'Great job! Your critter is proud. 🧡']
 
-// ── Settings (kept across sessions in $.store) ────────────────────
+// ── Settings (shared by every session, see below) ─────────────────
 let intervalMin = DEFAULT_INTERVAL_MIN
 let snoozeMin = DEFAULT_SNOOZE_MIN
 let isPaused = false
@@ -145,7 +145,67 @@ function parseMinutes(args: string): number | undefined {
   return Number.isInteger(n) && n >= 1 && n <= 1440 ? n : undefined
 }
 
-// ── History (kept across sessions in $.store) ─────────────────────
+// ── Shared between every open session ─────────────────────────────
+// Each session runs its own timers, so the schedule, the settings and the
+// history live in files every session reads fresh: <claude config>/water-reminder/.
+type Shared = {
+  intervalMin?: number
+  snoozeMin?: number
+  paused?: boolean
+  muted?: boolean
+  nextAt?: number | null // when the next question is due, null while paused or asking
+  scheduledMs?: number // how long that wait was, for the status bar
+  askedAt?: number // the latest question, from any session
+  answeredAt?: number // the latest answer, from any session
+  notifiedAt?: number // the latest Windows notification, so only one session sends it
+}
+
+let dataDir: string | undefined
+
+async function sharedDir($: EngineInterface): Promise<string> {
+  if (dataDir === undefined) {
+    const config = await $.env.get('CLAUDE_CONFIG_DIR')
+    const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME')) ?? '.'
+    dataDir = `${(config ?? `${home}/.claude`).replace(/[\\/]+$/, '')}/water-reminder`
+  }
+  return dataDir
+}
+
+async function readJson($: EngineInterface, name: string): Promise<unknown> {
+  try {
+    return JSON.parse(await $.fs.read(`${await sharedDir($)}/${name}`))
+  } catch {
+    return undefined
+  }
+}
+
+async function readShared($: EngineInterface): Promise<Shared> {
+  const value = await readJson($, 'shared.json')
+  return value && typeof value === 'object' ? (value as Shared) : {}
+}
+
+async function writeShared($: EngineInterface, patch: Shared): Promise<Shared> {
+  const next = { ...(await readShared($)), ...patch }
+  await $.fs.write(`${await sharedDir($)}/shared.json`, JSON.stringify(next, null, 2))
+  return next
+}
+
+// This session's settings, as every session should see them
+async function saveSettings($: EngineInterface) {
+  await writeShared($, { intervalMin, snoozeMin, paused: isPaused, muted: await read($, isMuted) })
+}
+
+// Takes another session's settings
+async function applySettings($: EngineInterface, s: Shared) {
+  if (typeof s.intervalMin === 'number') intervalMin = s.intervalMin
+  if (typeof s.snoozeMin === 'number') snoozeMin = s.snoozeMin
+  isPaused = s.paused === true
+  if ((await read($, isMuted)) !== (s.muted === true)) {
+    await update($, isMuted, () => s.muted === true)
+  }
+}
+
+// ── History (shared by every session, in log.json) ────────────────
 // One entry per answer: t = time, d = drank (true) or "Not yet" (false),
 // n = how many times it had asked before this answer.
 type LogEntry = { t: number; d: boolean; n: number }
@@ -158,6 +218,11 @@ const GOAL = 8 // glasses a day
 const GLASS_ML = 250
 
 async function readLog($: EngineInterface): Promise<LogEntry[]> {
+  const shared = await readJson($, 'log.json')
+  if (Array.isArray(shared)) {
+    return shared as LogEntry[]
+  }
+  // before log.json: this copy's own history
   const stored = await $.store.get('log')
   return Array.isArray(stored) ? (stored as LogEntry[]) : []
 }
@@ -165,7 +230,7 @@ async function readLog($: EngineInterface): Promise<LogEntry[]> {
 async function record($: EngineInterface, drank: boolean, asks: number) {
   const log = await readLog($)
   log.push({ t: await $.clock.now(), d: drank, n: asks })
-  await $.store.set('log', log.slice(-LOG_MAX))
+  await $.fs.write(`${await sharedDir($)}/log.json`, JSON.stringify(log.slice(-LOG_MAX)))
 }
 
 function dayKey(t: number): string {
@@ -490,41 +555,83 @@ function factsSvg(r: Report): Pic {
 }
 
 // ── Timers ────────────────────────────────────────────────────────
+const SYNC_MS = 30 * 1000
+const SLACK_MS = 2000
+
 let timer: Timer | undefined
 let nextAt: number | undefined
 let scheduledMs = 0
 let replyTimer: Timer | undefined
+let askedAtHere = 0 // when this session's band went up
 
-async function ask($: EngineInterface) {
+// Shows the question here; `notify` also sends the Windows notification
+async function ask($: EngineInterface, notify: boolean) {
   timer?.cancel()
+  timer = undefined
   nextAt = undefined
   replyTimer?.cancel()
+  askedAtHere = await $.clock.now()
   await update($, reply, () => null)
   await update($, nag, n => n + 1)
   await update($, isAsking, () => true)
   // a write from a timer can miss the band's redraw while a turn is streaming
   $.ui.invalidate('ui.render')
-  const script = notifyScript(await read($, isMuted))
-  void $.process
-    .run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodeCommand(script)])
-    .catch(() => undefined)
+  if (notify) {
+    const script = notifyScript(await read($, isMuted))
+    void $.process
+      .run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodeCommand(script)])
+      .catch(() => undefined)
+  }
 }
 
+// Arms this session's timer for `at`, without telling the others
+async function arm($: EngineInterface, at: number, waitMs: number) {
+  timer?.cancel()
+  nextAt = at
+  scheduledMs = waitMs
+  timer = $.clock.after(Math.max(0, at - (await $.clock.now())), () => void due($))
+}
+
+// Sets the next question `ms` from now, for every session
 async function schedule($: EngineInterface, ms: number) {
   timer?.cancel()
   timer = undefined
   nextAt = undefined
   if (isPaused) {
+    await writeShared($, { nextAt: null })
     return
   }
-  nextAt = (await $.clock.now()) + ms
-  scheduledMs = ms
-  timer = $.clock.after(ms, () => void ask($))
+  const at = (await $.clock.now()) + ms
+  await writeShared($, { nextAt: at, scheduledMs: ms })
+  await arm($, at, ms)
+}
+
+// This session's timer went off: ask, unless another session moved the schedule
+async function due($: EngineInterface) {
+  // spread the sessions out a little so one of them claims the notification first
+  await $.clock.sleep(Math.floor(Math.random() * 1500))
+  const s = await readShared($)
+  await applySettings($, s)
+  const now = await $.clock.now()
+  if (isPaused) {
+    return
+  }
+  if (typeof s.nextAt === 'number' && s.nextAt > now + SLACK_MS) {
+    await arm($, s.nextAt, s.scheduledMs ?? s.nextAt - now)
+    return
+  }
+  const pending = (s.askedAt ?? 0) > (s.answeredAt ?? 0)
+  const claimed = pending && (s.notifiedAt ?? 0) >= (s.askedAt ?? 0)
+  if (!claimed) {
+    await writeShared($, { askedAt: now, notifiedAt: now, nextAt: null })
+  }
+  await ask($, !claimed)
 }
 
 async function answer($: EngineInterface, drank: boolean) {
   await update($, isAsking, () => false)
   await record($, drank, await read($, nag))
+  await writeShared($, { answeredAt: await $.clock.now() })
   if (drank) {
     await update($, nag, () => 0)
     const cheer = YES_REPLIES[Math.floor(Math.random() * YES_REPLIES.length)]
@@ -536,6 +643,65 @@ async function answer($: EngineInterface, drank: boolean) {
   }
   replyTimer?.cancel()
   replyTimer = $.clock.after(REPLY_MS, () => void update($, reply, () => null))
+}
+
+// Every half minute: take what the other sessions changed
+async function sync($: EngineInterface) {
+  const s = await readShared($)
+  await applySettings($, s)
+  const asking = await read($, isAsking)
+  const pending = (s.askedAt ?? 0) > (s.answeredAt ?? 0)
+  if (isPaused) {
+    timer?.cancel()
+    timer = undefined
+    nextAt = undefined
+    return
+  }
+  if (asking && (s.answeredAt ?? 0) >= askedAtHere) {
+    // answered in another session
+    await update($, isAsking, () => false)
+    await update($, nag, () => 0)
+  } else if (!asking && pending && (s.askedAt ?? 0) > askedAtHere) {
+    // asked in another session: show it here too, without a second notification
+    await ask($, false)
+    askedAtHere = s.askedAt ?? askedAtHere
+    return
+  }
+  if (!(await read($, isAsking)) && typeof s.nextAt === 'number' && Math.abs(s.nextAt - (nextAt ?? 0)) > SLACK_MS) {
+    await arm($, s.nextAt, s.scheduledMs ?? s.nextAt - (await $.clock.now()))
+  }
+}
+
+// Starts this session from the shared schedule
+async function start($: EngineInterface) {
+  let s = await readShared($)
+  if (typeof s.intervalMin !== 'number') {
+    // first run with shared files: carry over this copy's own settings
+    const storedInterval = await $.store.get('intervalMin')
+    const storedSnooze = await $.store.get('snoozeMin')
+    intervalMin = typeof storedInterval === 'number' ? storedInterval : DEFAULT_INTERVAL_MIN
+    snoozeMin = typeof storedSnooze === 'number' ? storedSnooze : DEFAULT_SNOOZE_MIN
+    isPaused = (await $.store.get('isPaused')) === true
+    const storedMuted = (await $.store.get('isMuted')) === true
+    await update($, isMuted, () => storedMuted)
+    await saveSettings($)
+    s = await readShared($)
+  }
+  await applySettings($, s)
+
+  const now = await $.clock.now()
+  const pending = (s.askedAt ?? 0) > (s.answeredAt ?? 0)
+  if (isPaused) {
+    // nothing to arm
+  } else if (pending) {
+    await ask($, false)
+    askedAtHere = s.askedAt ?? now
+  } else if (typeof s.nextAt === 'number' && s.nextAt > now) {
+    await arm($, s.nextAt, s.scheduledMs ?? s.nextAt - now)
+  } else {
+    await schedule($, intervalMin * MINUTE)
+  }
+  $.clock.every(SYNC_MS, () => void sync($))
 }
 
 // ── Updates ───────────────────────────────────────────────────────
@@ -729,15 +895,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'water-update', description: 'Check for a new water-reminder version and install it' })
     await $.command.register({ name: 'water-version', description: 'Show the water-reminder version, its author and repo' })
 
-    const storedInterval = await $.store.get('intervalMin')
-    const storedSnooze = await $.store.get('snoozeMin')
-    intervalMin = typeof storedInterval === 'number' ? storedInterval : DEFAULT_INTERVAL_MIN
-    snoozeMin = typeof storedSnooze === 'number' ? storedSnooze : DEFAULT_SNOOZE_MIN
-    isPaused = (await $.store.get('isPaused')) === true
-    const storedMuted = await $.store.get('isMuted')
-    await update($, isMuted, () => storedMuted === true)
-
-    await schedule($, intervalMin * MINUTE)
+    await start($)
     return next(e)
   })
 
@@ -753,7 +911,10 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'water' }, async $ => {
-    await ask($)
+    const now = await $.clock.now()
+    await writeShared($, { askedAt: now, notifiedAt: now, nextAt: null })
+    await ask($, true)
+    askedAtHere = now
     return say($, '💧 Water check is up above the prompt.', {
       kind: 'line',
       icon: '💧',
@@ -764,6 +925,7 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'water-status' }, async $ => {
+    await sync($)
     const s = await settings($)
     if (isPaused) {
       return say($, '⏸️ Water reminders are paused. /water-resume to start again.', { kind: 'status', state: 'paused', settings: s })
@@ -784,7 +946,7 @@ export const register: Register = on => {
 
   on('command.run', { command: 'water-pause' }, async $ => {
     isPaused = true
-    await $.store.set('isPaused', true)
+    await saveSettings($)
     await schedule($, 0)
     return say($, '⏸️ Water reminders paused. /water-resume to start again.', {
       kind: 'line',
@@ -797,7 +959,7 @@ export const register: Register = on => {
 
   on('command.run', { command: 'water-resume' }, async $ => {
     isPaused = false
-    await $.store.set('isPaused', false)
+    await saveSettings($)
     await schedule($, intervalMin * MINUTE)
     return say($, `▶️ Water reminders back on. Next one in ${minutes(intervalMin)}.`, {
       kind: 'line',
@@ -820,7 +982,7 @@ export const register: Register = on => {
       })
     }
     intervalMin = n
-    await $.store.set('intervalMin', n)
+    await saveSettings($)
     await schedule($, n * MINUTE)
     return say($, `💧 Reminding every ${minutes(n)}${isPaused ? ' (paused, /water-resume to start)' : ''}.`, {
       kind: 'line',
@@ -843,7 +1005,7 @@ export const register: Register = on => {
       })
     }
     snoozeMin = n
-    await $.store.set('snoozeMin', n)
+    await saveSettings($)
     return say($, `⏳ "Not yet" now waits ${minutes(n)}.`, {
       kind: 'line',
       icon: '⏳',
@@ -1089,13 +1251,13 @@ export const register: Register = on => {
 
   on('command.run', { command: 'water-mute' }, async $ => {
     await update($, isMuted, () => true)
-    await $.store.set('isMuted', true)
+    await saveSettings($)
     return say($, '🔇 Water reminder sound off.', { kind: 'line', icon: '🔇', title: 'Sound off', hint: 'Reminders still pop up, just quietly. /water-unmute to undo', tone: 'dim' })
   })
 
   on('command.run', { command: 'water-unmute' }, async $ => {
     await update($, isMuted, () => false)
-    await $.store.set('isMuted', false)
+    await saveSettings($)
     return say($, '🔊 Water reminder sound on.', { kind: 'line', icon: '🔊', title: 'Sound on', hint: 'Each reminder plays a chime again', tone: 'blue' })
   })
 

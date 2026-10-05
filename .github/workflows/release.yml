@@ -2,12 +2,15 @@
 # section of CHANGELOG.md as its notes. Runs on GitHub; nothing to install.
 #
 # - Pushing a tag like v0.5.0 creates (or refreshes) that release.
-# - "Run workflow" in the Actions tab refreshes every tag's release.
+# - Changing CHANGELOG.md on main, or "Run workflow" in the Actions tab,
+#   refreshes every tag's release.
 name: Release
 
 on:
   push:
     tags: ['v*']
+    branches: [main]
+    paths: ['CHANGELOG.md', '.github/workflows/release.yml']
   workflow_dispatch:
 
 permissions:
@@ -39,7 +42,7 @@ jobs:
             ' CHANGELOG.md
           }
 
-          if [ "$EVENT" = "workflow_dispatch" ]; then
+          if [ "$EVENT" = "workflow_dispatch" ] || [ "${GITHUB_REF}" != "refs/tags/${TAG}" ]; then
             tags=$(git tag --list 'v*' --sort=version:refname)
           else
             tags="$TAG"

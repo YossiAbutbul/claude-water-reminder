@@ -1,6 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
+import type { DayRow, Note, Rank, Report, Settings } from '../types'
+
 const MINUTE = 60 * 1000
 const DEFAULT_INTERVAL_MIN = 60
 const DEFAULT_SNOOZE_MIN = 5
@@ -46,8 +48,17 @@ const isAsking = atom({ plugin: 'water-reminder', key: 'isAsking' } as const, fa
 const isMuted = atom({ plugin: 'water-reminder', key: 'isMuted' } as const, false)
 const nag = atom({ plugin: 'water-reminder', key: 'nag' } as const, 0)
 const reply = atom({ plugin: 'water-reminder', key: 'reply' } as const, null as string | null)
+// /water-stats runs this session, by their text
+const reports = atom({ plugin: 'water-reminder', key: 'reports' } as const, {} as Record<string, Report>)
+// other water commands' rows, by their text
+const notes = atom({ plugin: 'water-reminder', key: 'notes' } as const, {} as Record<string, Note>)
 
 // ── Critter sprite ────────────────────────────────────────────────
+// An interactive Svg is drawn in its own frame; a frame whose colour scheme
+// differs from the app's gets an opaque backdrop, so match whatever the app uses.
+const SVG_TRANSPARENT =
+  '<style>:root{color-scheme:light dark;background:transparent}html,body{margin:0;overflow:hidden;background:transparent}</style>'
+
 const PX = 5
 const COLORS: Record<string, string> = {
   L: '#EBA084', // body highlight
@@ -89,7 +100,8 @@ function px(x: number, y: number, fill: string): string {
 
 const SPRITE_SVG =
   `<svg xmlns="http://www.w3.org/2000/svg" width="${SPRITE_W}" height="${SPRITE_H}" ` +
-  `viewBox="0 -6 ${SPRITE_W} ${SPRITE_H}" shape-rendering="crispEdges">` +
+  `viewBox="0 -6 ${SPRITE_W} ${SPRITE_H}" shape-rendering="crispEdges" style="color-scheme:light dark">` +
+  SVG_TRANSPARENT +
   // gentle bob
   '<g><animateTransform attributeName="transform" type="translate" values="0 0;0 -3;0 0" dur="1.8s" repeatCount="indefinite"/>' +
   BODY.flatMap((row, y) => [...row].map((c, x) => (COLORS[c] ? px(x, y, COLORS[c]) : ''))).join('') +
@@ -133,9 +145,354 @@ function parseMinutes(args: string): number | undefined {
   return Number.isInteger(n) && n >= 1 && n <= 1440 ? n : undefined
 }
 
+// ── History (kept across sessions in $.store) ─────────────────────
+// One entry per answer: t = time, d = drank (true) or "Not yet" (false),
+// n = how many times it had asked before this answer.
+type LogEntry = { t: number; d: boolean; n: number }
+const LOG_MAX = 5000
+const DAY = 24 * 60 * MINUTE
+const SPARK = '▁▂▃▄▅▆▇█'
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const FULL_DAYS = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays']
+const GOAL = 8 // glasses a day
+const GLASS_ML = 250
+
+async function readLog($: EngineInterface): Promise<LogEntry[]> {
+  const stored = await $.store.get('log')
+  return Array.isArray(stored) ? (stored as LogEntry[]) : []
+}
+
+async function record($: EngineInterface, drank: boolean, asks: number) {
+  const log = await readLog($)
+  log.push({ t: await $.clock.now(), d: drank, n: asks })
+  await $.store.set('log', log.slice(-LOG_MAX))
+}
+
+function dayKey(t: number): string {
+  const d = new Date(t)
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
+}
+
+function hourLabel(h: number): string {
+  return `${String(h).padStart(2, '0')}:00`
+}
+
+function since(min: number): string {
+  if (min < 1) return 'just now'
+  if (min < 60) return `${min}m ago`
+  if (min < 48 * 60) return `${Math.floor(min / 60)}h ${min % 60}m ago`
+  return `${Math.floor(min / (24 * 60))} days ago`
+}
+
+function rankFor(drinks: number, perDay: number): Rank {
+  if (drinks === 0) return { emoji: '🌵', name: 'Cactus', blurb: 'no sips logged yet' }
+  if (perDay >= 8) return { emoji: '🐋', name: 'Blue Whale', blurb: 'legendary hydration' }
+  if (perDay >= 6) return { emoji: '🐬', name: 'Dolphin', blurb: 'swimming in it' }
+  if (perDay >= 4) return { emoji: '🐟', name: 'Fish', blurb: 'solid and steady' }
+  if (perDay >= 2) return { emoji: '🐸', name: 'Frog', blurb: 'getting there' }
+  return { emoji: '🐪', name: 'Camel', blurb: 'running on reserves' }
+}
+
+function buildReport(log: LogEntry[], now: number, days: number): Report {
+  const today = new Date(now)
+  const dayAt = (i: number) => new Date(today.getFullYear(), today.getMonth(), today.getDate() - i)
+
+  const drinksByDay = new Map<string, number>()
+  const skipsByDay = new Map<string, number>()
+  const hours: number[] = new Array(24).fill(0)
+  const skipsByHour: number[] = new Array(24).fill(0)
+  const byWeekday: number[] = new Array(7).fill(0)
+  let drinks = 0
+  let skips = 0
+  let firstTry = 0
+  for (const e of log) {
+    const k = dayKey(e.t)
+    const date = new Date(e.t)
+    if (e.d) {
+      drinks++
+      if (e.n <= 1) firstTry++
+      drinksByDay.set(k, (drinksByDay.get(k) ?? 0) + 1)
+      hours[date.getHours()]++
+      byWeekday[date.getDay()]++
+    } else {
+      skips++
+      skipsByDay.set(k, (skipsByDay.get(k) ?? 0) + 1)
+      skipsByHour[date.getHours()]++
+    }
+  }
+
+  const rows: DayRow[] = []
+  for (let i = days - 1; i >= 0; i--) {
+    const d = dayAt(i)
+    const k = dayKey(d.getTime())
+    rows.push({
+      label: `${WEEKDAYS[d.getDay()]} ${d.getDate()}`,
+      drinks: drinksByDay.get(k) ?? 0,
+      skips: skipsByDay.get(k) ?? 0,
+      isToday: i === 0,
+    })
+  }
+
+  // Streaks: days in a row with at least one drink (today counts once you drink)
+  let streak = 0
+  for (let i = (drinksByDay.get(dayKey(now)) ?? 0) > 0 ? 0 : 1; (drinksByDay.get(dayKey(dayAt(i).getTime())) ?? 0) > 0; i++) {
+    streak++
+  }
+  const drinkDays = [...drinksByDay.keys()]
+    .map(k => {
+      const [y, m, d] = k.split('-').map(Number)
+      return new Date(y, m - 1, d).getTime()
+    })
+    .sort((a, b) => a - b)
+  let best = 0
+  let run = 0
+  for (let i = 0; i < drinkDays.length; i++) {
+    run = i > 0 && Math.round((drinkDays[i] - drinkDays[i - 1]) / DAY) === 1 ? run + 1 : 1
+    best = Math.max(best, run)
+  }
+
+  const windowDrinks = rows.reduce((a, r) => a + r.drinks, 0)
+  const windowSkips = rows.reduce((a, r) => a + r.skips, 0)
+  const activeDays = rows.filter(r => r.drinks + r.skips > 0).length
+  const perDay = activeDays === 0 ? 0 : windowDrinks / activeDays
+  const half = Math.floor(days / 2)
+  const early = rows.slice(0, half).reduce((a, r) => a + r.drinks, 0)
+  const late = rows.slice(days - half).reduce((a, r) => a + r.drinks, 0)
+  const lastDrink = [...log].reverse().find(e => e.d)
+  const first = dayAt(days - 1)
+
+  return {
+    days,
+    range: days === 1 ? 'today' : `${first.getDate()}/${first.getMonth() + 1} to ${today.getDate()}/${today.getMonth() + 1}`,
+    rows,
+    hours,
+    today: rows[rows.length - 1],
+    lastSip: lastDrink ? since(Math.round((now - lastDrink.t) / MINUTE)) : null,
+    windowDrinks,
+    windowSkips,
+    litres: (windowDrinks * GLASS_ML) / 1000,
+    perDay,
+    trend: days < 2 ? null : late > early ? 'up' : late < early ? 'down' : 'flat',
+    drinks,
+    skips,
+    yesRate: drinks + skips === 0 ? null : Math.round((drinks / (drinks + skips)) * 100),
+    firstTryRate: drinks === 0 ? null : Math.round((firstTry / drinks) * 100),
+    streak,
+    best,
+    thirstiest: drinks > 0 ? hourLabel(hours.indexOf(Math.max(...hours))) : null,
+    bestDay: drinks > 0 ? FULL_DAYS[byWeekday.indexOf(Math.max(...byWeekday))] : null,
+    snoozeHour: skips > 0 ? hourLabel(skipsByHour.indexOf(Math.max(...skipsByHour))) : null,
+    snoozesPerSip: drinks > 0 && skips > 0 ? (skips / drinks).toFixed(1) : null,
+    rank: rankFor(windowDrinks, perDay),
+  }
+}
+
+const TREND = { up: 'trending up', down: 'trending down', flat: 'holding steady' }
+
+function insights(r: Report): string[] {
+  return [
+    r.thirstiest ? `You drink most around ${r.thirstiest}, and most on ${r.bestDay}.` : '',
+    r.snoozeHour ? `"Not yet" comes up most around ${r.snoozeHour}. A bottle on the desk then might help.` : '',
+    r.snoozesPerSip ? `${r.snoozesPerSip} snoozes per glass on average.` : '',
+    r.firstTryRate !== null ? `Yes on the first ask ${r.firstTryRate}% of the time.` : '',
+    r.trend ? `Second half of the period vs first: ${TREND[r.trend]}.` : '',
+    `All time: ${r.drinks} glasses, ${r.skips} snoozes, best streak ${r.best} day${r.best === 1 ? '' : 's'}.`,
+  ].filter(Boolean)
+}
+
+// The command's text: what the model reads, and the row drawn wherever the card below can't be
+function reportText(r: Report): string {
+  const BAR = 24
+  const most = Math.max(1, ...r.rows.map(x => x.drinks + x.skips))
+  const scale = most > BAR ? BAR / most : 1
+  const width = Math.round(most * scale)
+  const chart = r.rows.map(x => {
+    const bar = '█'.repeat(Math.round(x.drinks * scale)) + '░'.repeat(Math.round(x.skips * scale))
+    return `${x.label.padEnd(6)} │${bar.padEnd(width)} ${x.drinks} drank, ${x.skips} not yet`
+  })
+  const peak = Math.max(1, ...r.hours)
+  const spark = r.hours.map(n => (n === 0 ? '·' : SPARK[Math.min(7, Math.floor((n / peak) * 7.99))])).join('')
+  return [
+    `### 💧 Hydration report · ${r.range}`,
+    `**${r.rank.emoji} ${r.rank.name}**: ${r.rank.blurb}`,
+    '',
+    `**Today** ${r.today.drinks}/${GOAL} glasses · **Streak** 🔥 ${r.streak} · **Yes rate** ${r.yesRate ?? '-'}% · **Water** ≈ ${r.litres.toFixed(1)} L`,
+    '',
+    '```',
+    ...chart,
+    '',
+    `00 ${spark} 23   sips by hour`,
+    '```',
+    ...insights(r).map(l => `- ${l}`),
+  ].join('\n')
+}
+
+// ── Stats card (drawn in the transcript in place of the text) ─────
+const INK = '#8A94A0'
+const SKIP = '#9AA4AE'
+const CHART_W = 560
+const FONT = 'font-family="ui-monospace, SFMono-Regular, Consolas, monospace"'
+
+type Pic = { source: string; width: number; height: number }
+
+function svgOpen(w: number, h: number, viewBox = `0 0 ${w} ${h}`): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="${viewBox}" ${FONT} style="background:transparent;color-scheme:light dark">${SVG_TRANSPARENT}`
+}
+
+// ── Drinking critter: lifts the bottle, tilts it to its face, drains it, lowers it
+const BOTTLE = new Set(['C', 'W', 'H', 'B', 'b'])
+const WATER = new Set(['B', 'b'])
+const DRINK_DUR = '4s'
+const DRINK_TIMES = '0;0.2;0.35;0.7;0.85;1'
+
+function drinkingSvg(): Pic {
+  const W = SPRITE_W + 10
+  const H = SPRITE_H + 14
+  const cells = (pick: (c: string) => boolean) =>
+    BODY.flatMap((row, y) => [...row].map((c, x) => (pick(c) && COLORS[c] ? px(x, y, COLORS[c]) : ''))).join('')
+  // water drains from the top while the bottle is tipped up
+  const waterTop = 3 * PX
+  const waterBottom = 9 * PX
+  const pivot = `${15 * PX} ${5 * PX}`
+  let s = svgOpen(W, H, `-4 -14 ${W} ${H}`).replace('<svg ', '<svg shape-rendering="crispEdges" ')
+  s += `<defs><clipPath id="dk-water"><rect x="${13 * PX}" width="${4 * PX}" y="${waterTop}" height="${waterBottom - waterTop}">`
+  // tipped cap-down, the water stays by the cap and shrinks away from the base
+  const full = waterBottom - waterTop
+  s += `<animate attributeName="height" values="${full};${full};${full};0;0;${full}" keyTimes="${DRINK_TIMES}" dur="${DRINK_DUR}" repeatCount="indefinite"/>`
+  s += '</rect></clipPath></defs>'
+  // body, with a small gulp while drinking
+  s += '<g>'
+  s += `<animateTransform attributeName="transform" type="translate" values="0 0;0 0;0 -1;0 0;0 -1;0 0;0 0" keyTimes="0;0.35;0.45;0.55;0.62;0.7;1" dur="${DRINK_DUR}" repeatCount="indefinite"/>`
+  s += cells(c => !BOTTLE.has(c) && c !== 'K')
+  // open eyes, swapped for squinting ones while drinking
+  s += `<g>${EYES.map(([x, y]) => px(x, y, COLORS.K)).join('')}`
+  s += `<animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="${DRINK_TIMES}" calcMode="discrete" dur="${DRINK_DUR}" repeatCount="indefinite"/></g>`
+  s += `<g opacity="0">${px(2, 5, COLORS.K)}${px(3, 4, COLORS.K)}${px(4, 5, COLORS.K)}${px(7, 5, COLORS.K)}${px(8, 4, COLORS.K)}${px(9, 5, COLORS.K)}`
+  s += `<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="${DRINK_TIMES}" calcMode="discrete" dur="${DRINK_DUR}" repeatCount="indefinite"/></g>`
+  s += '</g>'
+  // bottle: raised and tipped toward the face, then put back
+  s += '<g>'
+  s += `<animateTransform attributeName="transform" type="translate" values="0 0;0 0;-4 -12;-4 -12;0 0;0 0" keyTimes="${DRINK_TIMES}" dur="${DRINK_DUR}" repeatCount="indefinite"/>`
+  s += '<g>'
+  s += `<animateTransform attributeName="transform" type="rotate" values="0 ${pivot};0 ${pivot};-125 ${pivot};-125 ${pivot};0 ${pivot};0 ${pivot}" keyTimes="${DRINK_TIMES}" dur="${DRINK_DUR}" repeatCount="indefinite"/>`
+  s += cells(c => BOTTLE.has(c) && !WATER.has(c))
+  s += `<g clip-path="url(#dk-water)">${cells(c => WATER.has(c))}</g>`
+  s += '</g></g>'
+  // a drop of satisfaction once it's done
+  s += `<rect x="${5 * PX}" y="-6" width="4" height="4" fill="${BLUE}" opacity="0">`
+  s += `<animate attributeName="opacity" values="0;0;1;0" keyTimes="0;0.7;0.78;0.95" dur="${DRINK_DUR}" repeatCount="indefinite"/>`
+  s += `<animate attributeName="y" values="-2;-2;-8;-12" keyTimes="0;0.7;0.78;0.95" dur="${DRINK_DUR}" repeatCount="indefinite"/></rect>`
+  return { source: s + '</svg>', width: W, height: H }
+}
+
+const DRINKING = drinkingSvg()
+
+// Plain columns: drank in blue, "Not yet" stacked on top as an outline, today darker
+function dayChartSvg(r: Report): Pic {
+  const W = CHART_W
+  const H = 150
+  const top = 14
+  const bottom = 20
+  const n = r.rows.length
+  const slot = W / n
+  const barW = Math.max(2, Math.min(28, slot * 0.55))
+  const most = Math.max(1, ...r.rows.map(x => x.drinks + x.skips))
+  const y = (v: number) => (v / most) * (H - top - bottom)
+  const base = H - bottom
+  const every = Math.ceil(n / 8)
+  let s = svgOpen(W, H)
+  if (GOAL <= most) {
+    const gy = base - y(GOAL)
+    s += `<line x1="0" x2="${W}" y1="${gy}" y2="${gy}" stroke="${INK}" stroke-opacity="0.5" stroke-dasharray="2 3"/>`
+    s += `<text x="${W}" y="${gy - 3}" text-anchor="end" font-size="9" fill="${INK}">goal ${GOAL}</text>`
+  }
+  r.rows.forEach((x, i) => {
+    const cx = i * slot + slot / 2
+    const bx = cx - barW / 2
+    const dh = y(x.drinks)
+    const sh = y(x.skips)
+    if (x.skips > 0) {
+      s += `<rect x="${bx + 0.5}" y="${base - dh - sh + 0.5}" width="${barW - 1}" height="${sh - 1}" fill="none" stroke="${SKIP}" stroke-opacity="0.7"/>`
+    }
+    if (x.drinks > 0) {
+      s += `<rect x="${bx}" y="${base - dh}" width="${barW}" height="${dh}" fill="${x.isToday ? '#1E6FA8' : BLUE}"/>`
+    }
+    if (x.drinks > 0 && n <= 31) {
+      s += `<text x="${cx}" y="${base - dh - sh - 4}" text-anchor="middle" font-size="10" fill="${INK}">${x.drinks}</text>`
+    }
+    if (i % every === 0 || x.isToday) {
+      s += `<text x="${cx}" y="${H - 5}" text-anchor="middle" font-size="9.5" fill="${INK}"${x.isToday ? ' font-weight="700"' : ''}>${x.isToday ? 'today' : x.label.toLowerCase()}</text>`
+    }
+  })
+  s += `<line x1="0" x2="${W}" y1="${base + 0.5}" y2="${base + 0.5}" stroke="${INK}" stroke-opacity="0.6"/>`
+  return { source: s + '</svg>', width: W, height: H }
+}
+
+// 24 thin columns, one per hour
+function hourChartSvg(r: Report): Pic {
+  const W = CHART_W
+  const H = 56
+  const bottom = 16
+  const slot = W / 24
+  const peak = Math.max(1, ...r.hours)
+  const base = H - bottom
+  let s = svgOpen(W, H)
+  r.hours.forEach((n, h) => {
+    const bh = (n / peak) * (base - 4)
+    if (n > 0) {
+      s += `<rect x="${h * slot + slot * 0.3}" y="${base - bh}" width="${slot * 0.4}" height="${bh}" fill="${BLUE}"/>`
+    }
+    if (h % 6 === 0) {
+      s += `<text x="${h * slot + slot / 2}" y="${H - 4}" text-anchor="middle" font-size="9.5" fill="${INK}">${hourLabel(h).slice(0, 2)}h</text>`
+    }
+  })
+  s += `<line x1="0" x2="${W}" y1="${base + 0.5}" y2="${base + 0.5}" stroke="${INK}" stroke-opacity="0.6"/>`
+  return { source: s + '</svg>', width: W, height: H }
+}
+
+function facts(r: Report): [string, string][] {
+  const out: [string, string][] = []
+  if (r.thirstiest) out.push(['peak hour', r.thirstiest])
+  if (r.bestDay) out.push(['best day', r.bestDay.slice(0, -1)])
+  if (r.firstTryRate !== null) out.push(['yes on first ask', `${r.firstTryRate}%`])
+  if (r.snoozesPerSip) out.push(['snoozes per glass', r.snoozesPerSip])
+  if (r.trend) out.push(['trend', { up: '↑ up', down: '↓ down', flat: '→ steady' }[r.trend]])
+  out.push(['best streak', `${r.best} day${r.best === 1 ? '' : 's'}`])
+  out.push(['all time', `${r.drinks} glass${r.drinks === 1 ? '' : 'es'} · ${r.skips} snooze${r.skips === 1 ? '' : 's'}`])
+  return out
+}
+
+// A softly tinted panel of label / value pairs, three to a row
+function factsSvg(r: Report): Pic {
+  const W = CHART_W
+  const pad = 18
+  const cols = 3
+  const rowH = 46
+  const items = facts(r)
+  const rows = Math.ceil(items.length / cols)
+  const tip = r.snoozeHour ? `"Not yet" peaks around ${r.snoozeHour}. Keep a bottle within reach then.` : ''
+  const H = pad + 18 + rows * rowH + (tip ? 22 : 0) + pad - 8
+  const colW = (W - pad * 2) / cols
+  const sans = 'font-family="system-ui, -apple-system, Segoe UI, sans-serif"'
+  let s = svgOpen(W, H)
+  s += `<rect x="0.5" y="0.5" width="${W - 1}" height="${H - 1}" rx="12" fill="${BLUE}" fill-opacity="0.08"/>`
+  s += `<text x="${pad}" y="${pad + 4}" font-size="10" letter-spacing="1.2" fill="${INK}">AT A GLANCE</text>`
+  items.forEach(([label, value], i) => {
+    const x = pad + (i % cols) * colW
+    const y = pad + 18 + Math.floor(i / cols) * rowH
+    s += `<text x="${x}" y="${y + 14}" font-size="11" fill="${INK}" ${sans}>${label}</text>`
+    s += `<text x="${x}" y="${y + 34}" font-size="17" font-weight="600" fill="${BLUE}" ${sans}>${value}</text>`
+  })
+  if (tip) {
+    s += `<text x="${pad}" y="${H - pad + 2}" font-size="11.5" font-style="italic" fill="${INK}" ${sans}>${tip.replace(/"/g, '&quot;')}</text>`
+  }
+  return { source: s + '</svg>', width: W, height: H }
+}
+
 // ── Timers ────────────────────────────────────────────────────────
 let timer: Timer | undefined
 let nextAt: number | undefined
+let scheduledMs = 0
 let replyTimer: Timer | undefined
 
 async function ask($: EngineInterface) {
@@ -145,6 +502,9 @@ async function ask($: EngineInterface) {
   await update($, reply, () => null)
   await update($, nag, n => n + 1)
   await update($, isAsking, () => true)
+  // a write from a timer can miss the band's redraw while a turn is streaming
+  $.ui.invalidate('ui.render')
+  $.ui.toast('💧 Water break! Answer just above the prompt.')
   const script = notifyScript(await read($, isMuted))
   void $.process
     .run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodeCommand(script)])
@@ -159,11 +519,13 @@ async function schedule($: EngineInterface, ms: number) {
     return
   }
   nextAt = (await $.clock.now()) + ms
+  scheduledMs = ms
   timer = $.clock.after(ms, () => void ask($))
 }
 
 async function answer($: EngineInterface, drank: boolean) {
   await update($, isAsking, () => false)
+  await record($, drank, await read($, nag))
   if (drank) {
     await update($, nag, () => 0)
     const cheer = YES_REPLIES[Math.floor(Math.random() * YES_REPLIES.length)]
@@ -175,6 +537,130 @@ async function answer($: EngineInterface, drank: boolean) {
   }
   replyTimer?.cancel()
   replyTimer = $.clock.after(REPLY_MS, () => void update($, reply, () => null))
+}
+
+// ── Updates ───────────────────────────────────────────────────────
+const PLUGIN_ID = 'water-reminder@claude-water-reminder'
+const MARKETPLACE = 'claude-water-reminder'
+const LATEST_MANIFEST = 'https://raw.githubusercontent.com/YossiAbutbul/claude-water-reminder/main/.claude-plugin/plugin.json'
+
+// "0.10.1" vs "0.9.3": positive when a is newer
+function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map(n => parseInt(n, 10) || 0)
+  const pb = b.split('.').map(n => parseInt(n, 10) || 0)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (d !== 0) return d
+  }
+  return 0
+}
+
+// `claude` is a .cmd shim on Windows, which only starts through cmd.exe
+async function claudeCli($: EngineInterface, args: string[]) {
+  const init = { timeoutMs: 3 * MINUTE }
+  try {
+    return await $.process.run(['claude', ...args], init)
+  } catch {
+    return await $.process.run(['cmd.exe', '/d', '/c', 'claude', ...args], init)
+  }
+}
+
+function firstLine(text: string): string {
+  return text.split('\n').map(l => l.trim()).find(Boolean) ?? ''
+}
+
+// ── Command output rows ───────────────────────────────────────────
+async function settings($: EngineInterface): Promise<Settings> {
+  return { intervalMin, snoozeMin, paused: isPaused, muted: await read($, isMuted) }
+}
+
+// Answers a command with `text` (what the model reads, and the fallback row)
+// and keeps `note` so the row draws styled
+async function say($: EngineInterface, text: string, note: Note) {
+  await update($, notes, all => Object.fromEntries([...Object.entries(all).filter(([t]) => t !== text), [text, note]].slice(-40)))
+  return { text }
+}
+
+function noteFor(all: Record<string, Note>, text: string): Note | undefined {
+  return all[text] ?? Object.entries(all).find(([t]) => text.endsWith(t))?.[1]
+}
+
+function settingsLine(s: Settings): string {
+  return `every ${minutes(s.intervalMin)} · "not yet" waits ${minutes(s.snoozeMin)} · sound ${s.muted ? 'off' : 'on'}${s.paused ? ' · paused' : ''}`
+}
+
+type Els = ReturnType<EngineInterface['ui']['resolve']>
+
+function drawNote(els: Els, note: Note) {
+  const { Box, Text } = els
+  const tone = (t: 'blue' | 'orange' | 'dim') => (t === 'blue' ? BLUE : t === 'orange' ? ORANGE : INK)
+
+  if (note.kind === 'line') {
+    return (
+      <Box key="water-note" flexDirection="row" gap={1} paddingY={0}>
+        <Text>{note.icon}</Text>
+        <Box flexDirection="column">
+          <Text bold color={tone(note.tone)}>
+            {note.title}
+          </Text>
+          {note.hint ? <Text dimColor>{note.hint}</Text> : null}
+        </Box>
+      </Box>
+    )
+  }
+
+  // status
+  {
+    const BAR = 28
+    const filled = Math.round(Math.min(1, Math.max(0, note.progress ?? 0)) * BAR)
+    const critter =
+      'Svg' in els ? (
+        <els.Svg source={SPRITE_SVG} alt="Claude critter holding a water bottle" width={SPRITE_W} height={SPRITE_H} />
+      ) : (
+        <Box flexDirection="column">
+          {CRITTER_TEXT.map((line, i) => (
+            <Text key={`c${i}`} color={ORANGE}>
+              {line}
+            </Text>
+          ))}
+        </Box>
+      )
+    return (
+      <Box key="water-note" flexDirection="row" gap={2} alignItems="center" paddingY={1}>
+        {critter}
+        <Box flexDirection="column">
+          <Text dimColor>next water break</Text>
+          {note.state === 'scheduled' ? (
+            <Box flexDirection="column">
+              <Box flexDirection="row" gap={1}>
+                <Text bold color={BLUE}>
+                  in {minutes(note.leftMin ?? 0)}
+                </Text>
+                <Text dimColor>at {note.at}</Text>
+              </Box>
+              <Box flexDirection="row">
+                <Text color={BLUE}>{'━'.repeat(filled)}</Text>
+                <Text dimColor>{'━'.repeat(BAR - filled)}</Text>
+              </Box>
+            </Box>
+          ) : note.state === 'asking' ? (
+            <Box flexDirection="column">
+              <Text bold color={ORANGE}>
+                now, waiting for your answer
+              </Text>
+              <Text dimColor>the question is just above the prompt</Text>
+            </Box>
+          ) : (
+            <Box flexDirection="column">
+              <Text bold>paused</Text>
+              <Text dimColor>/water-resume to start again</Text>
+            </Box>
+          )}
+          <Text dimColor>{settingsLine(note.settings)}</Text>
+        </Box>
+      </Box>
+    )
+  }
 }
 
 export const register: Register = on => {
@@ -193,8 +679,15 @@ export const register: Register = on => {
       description: 'Set how long "Not yet" waits, in minutes',
       argumentHint: '<minutes>',
     })
+    await $.command.register({
+      name: 'water-stats',
+      description: 'Chart and analysis of your water history',
+      argumentHint: '[days]',
+    })
     await $.command.register({ name: 'water-mute', description: 'Turn off the water reminder sound' })
     await $.command.register({ name: 'water-unmute', description: 'Turn on the water reminder sound' })
+    await $.command.register({ name: 'water-help', description: 'List the water reminder commands' })
+    await $.command.register({ name: 'water-update', description: 'Check for a new water-reminder version and install it' })
 
     const storedInterval = await $.store.get('intervalMin')
     const storedSnooze = await $.store.get('snoozeMin')
@@ -208,74 +701,359 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // keep a pending question on screen however the turn around it goes
+  const redrawIfAsking = async ($: EngineInterface) => {
+    if (await read($, isAsking)) {
+      $.ui.invalidate('ui.render')
+    }
+  }
+  on('turn.start', async ($, e, next) => {
+    await redrawIfAsking($)
+    return next(e)
+  })
+  on('turn.complete', async ($, e, next) => {
+    const result = await next(e)
+    await redrawIfAsking($)
+    return result
+  })
+
   on('command.run', { command: 'water' }, async $ => {
     await ask($)
-    return { text: '💧 Water check is up above the prompt.' }
+    return say($, '💧 Water check is up above the prompt.', {
+      kind: 'line',
+      icon: '💧',
+      title: 'Water check is up',
+      hint: 'Answer it just above the prompt.',
+      tone: 'blue',
+    })
   })
 
   on('command.run', { command: 'water-status' }, async $ => {
-    const muted = await read($, isMuted)
-    let next = 'paused'
-    if (!isPaused && nextAt !== undefined) {
-      const left = Math.max(1, Math.round((nextAt - (await $.clock.now())) / MINUTE))
-      const at = new Date(nextAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      next = `at ${at} (in ${minutes(left)})`
-    } else if (!isPaused) {
-      next = 'waiting for your answer'
+    const s = await settings($)
+    if (isPaused) {
+      return say($, '⏸️ Water reminders are paused. /water-resume to start again.', { kind: 'status', state: 'paused', settings: s })
     }
-    return {
-      text: [
-        `💧 Next reminder: ${next}`,
-        `Every ${minutes(intervalMin)} · "Not yet" waits ${minutes(snoozeMin)} · sound ${muted ? 'off 🔇' : 'on 🔊'}`,
-      ].join('\n'),
+    if (nextAt === undefined) {
+      return say($, '💧 Waiting for your answer to the water check above the prompt.', { kind: 'status', state: 'asking', settings: s })
     }
+    const leftMs = Math.max(0, nextAt - (await $.clock.now()))
+    const leftMin = Math.max(1, Math.round(leftMs / MINUTE))
+    const at = new Date(nextAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    const progress = scheduledMs > 0 ? 1 - leftMs / scheduledMs : 0
+    return say(
+      $,
+      `💧 Next reminder at ${at} (in ${minutes(leftMin)})\nEvery ${minutes(s.intervalMin)} · "Not yet" waits ${minutes(s.snoozeMin)} · sound ${s.muted ? 'off' : 'on'}`,
+      { kind: 'status', state: 'scheduled', at, leftMin, progress, settings: s },
+    )
   })
 
   on('command.run', { command: 'water-pause' }, async $ => {
     isPaused = true
     await $.store.set('isPaused', true)
     await schedule($, 0)
-    return { text: '⏸️ Water reminders paused. /water-resume to start again.' }
+    return say($, '⏸️ Water reminders paused. /water-resume to start again.', {
+      kind: 'line',
+      icon: '⏸️',
+      title: 'Reminders paused',
+      hint: '/water-resume to start again',
+      tone: 'dim',
+    })
   })
 
   on('command.run', { command: 'water-resume' }, async $ => {
     isPaused = false
     await $.store.set('isPaused', false)
     await schedule($, intervalMin * MINUTE)
-    return { text: `▶️ Water reminders back on. Next one in ${minutes(intervalMin)}.` }
+    return say($, `▶️ Water reminders back on. Next one in ${minutes(intervalMin)}.`, {
+      kind: 'line',
+      icon: '▶️',
+      title: 'Reminders back on',
+      hint: `Next one in ${minutes(intervalMin)}`,
+      tone: 'blue',
+    })
   })
 
   on('command.run', { command: 'water-every' }, async ($, e) => {
     const n = parseMinutes(e.args)
     if (n === undefined) {
-      return { text: `Usage: /water-every <minutes>, e.g. /water-every 45 (now every ${minutes(intervalMin)})` }
+      return say($, `Usage: /water-every <minutes>, e.g. /water-every 45 (now every ${minutes(intervalMin)})`, {
+        kind: 'line',
+        icon: '⚠️',
+        title: 'How often, in minutes?',
+        hint: `e.g. /water-every 45 · now every ${minutes(intervalMin)}`,
+        tone: 'orange',
+      })
     }
     intervalMin = n
     await $.store.set('intervalMin', n)
     await schedule($, n * MINUTE)
-    return { text: `💧 Reminding every ${minutes(n)}${isPaused ? ' (paused, /water-resume to start)' : ''}.` }
+    return say($, `💧 Reminding every ${minutes(n)}${isPaused ? ' (paused, /water-resume to start)' : ''}.`, {
+      kind: 'line',
+      icon: '🕒',
+      title: `Reminding every ${minutes(n)}`,
+      hint: isPaused ? 'Paused for now, /water-resume to start' : `Next one in ${minutes(n)}`,
+      tone: 'blue',
+    })
   })
 
   on('command.run', { command: 'water-snooze' }, async ($, e) => {
     const n = parseMinutes(e.args)
     if (n === undefined) {
-      return { text: `Usage: /water-snooze <minutes>, e.g. /water-snooze 10 (now ${minutes(snoozeMin)})` }
+      return say($, `Usage: /water-snooze <minutes>, e.g. /water-snooze 10 (now ${minutes(snoozeMin)})`, {
+        kind: 'line',
+        icon: '⚠️',
+        title: 'How long should "Not yet" wait, in minutes?',
+        hint: `e.g. /water-snooze 10 · now ${minutes(snoozeMin)}`,
+        tone: 'orange',
+      })
     }
     snoozeMin = n
     await $.store.set('snoozeMin', n)
-    return { text: `⏳ "Not yet" now waits ${minutes(n)}.` }
+    return say($, `⏳ "Not yet" now waits ${minutes(n)}.`, {
+      kind: 'line',
+      icon: '⏳',
+      title: `"Not yet" now waits ${minutes(n)}`,
+      tone: 'blue',
+    })
+  })
+
+  on('command.run', { command: 'water-stats' }, async ($, e) => {
+    const n = e.args.trim() === '' ? 7 : Number(e.args.trim())
+    if (!Number.isInteger(n) || n < 1 || n > 90) {
+      return say($, 'Usage: /water-stats [days], e.g. /water-stats 14 (1 to 90, default 7)', {
+        kind: 'line',
+        icon: '⚠️',
+        title: 'How many days?',
+        hint: 'e.g. /water-stats 14 · 1 to 90, default 7',
+        tone: 'orange',
+      })
+    }
+    const log = await readLog($)
+    if (log.length === 0) {
+      return say($, '💧 No water history yet. Answer a reminder (or run /water) and come back!', {
+        kind: 'line',
+        icon: '💧',
+        title: 'No water history yet',
+        hint: 'Answer a reminder (or run /water) and come back',
+        tone: 'blue',
+      })
+    }
+    const report = buildReport(log, await $.clock.now(), n)
+    const text = reportText(report)
+    // keep the last few so their rows still draw as cards
+    await update($, reports, all => Object.fromEntries([...Object.entries(all), [text, report]].slice(-20)))
+    return { text }
+  })
+
+  on('ui.render', { component: 'CommandOutput', props: { command: 'water-stats' } }, async ($, e, next) => {
+    const all = await read($, reports)
+    const r = all[e.props.text] ?? Object.entries(all).find(([t]) => e.props.text.endsWith(t))?.[1]
+    if (!r) {
+      const note = noteFor(await read($, notes), e.props.text)
+      return note ? drawNote($.ui.resolve(e), note) : next(e)
+    }
+
+    const els = $.ui.resolve(e)
+    const { Box, Text } = els
+    const hasSvg = 'Svg' in els
+
+    const stat = (key: string, value: string, label: string) => (
+      <Box key={key} flexDirection="column" minWidth={14}>
+        <Text bold>{value}</Text>
+        <Text dimColor>{label}</Text>
+      </Box>
+    )
+
+    // terminal: one row per day, █ drank, ░ not yet
+    const most = Math.max(1, ...r.rows.map(x => x.drinks + x.skips))
+    const scale = most > 30 ? 30 / most : 1
+    const textChart = (
+      <Box flexDirection="column">
+        {r.rows.map((x, i) => (
+          <Box key={`d${i}`} flexDirection="row">
+            <Text dimColor={!x.isToday} bold={x.isToday}>
+              {(x.isToday ? 'today' : x.label.toLowerCase()).padEnd(7)}
+            </Text>
+            <Text color={BLUE}>{'█'.repeat(Math.round(x.drinks * scale))}</Text>
+            <Text dimColor>{'░'.repeat(Math.round(x.skips * scale))}</Text>
+            <Text dimColor>{x.drinks > 0 ? ` ${x.drinks}` : ''}</Text>
+          </Box>
+        ))}
+      </Box>
+    )
+    const peak = Math.max(1, ...r.hours)
+    const textHours = (
+      <Box flexDirection="column">
+        <Text color={BLUE}>{r.hours.map(n => (n === 0 ? ' ' : SPARK[Math.min(7, Math.floor((n / peak) * 7.99))])).join('')}</Text>
+        <Text dimColor>00h   06h   12h   18h</Text>
+      </Box>
+    )
+
+    const days = dayChartSvg(r)
+    const hours = hourChartSvg(r)
+    const factsPic = factsSvg(r)
+
+    return (
+      <Box key="water-stats" flexDirection="column" gap={1} paddingY={1}>
+        <Box flexDirection="row" alignItems="flex-end" gap={2}>
+          {hasSvg ? (
+            <els.Svg source={DRINKING.source} alt="Claude critter drinking water" width={DRINKING.width} height={DRINKING.height} isInteractive />
+          ) : (
+            <Box flexDirection="column">
+              {CRITTER_TEXT.map((line, i) => (
+                <Text key={`c${i}`} color={ORANGE}>
+                  {line}
+                </Text>
+              ))}
+            </Box>
+          )}
+          <Box flexDirection="column">
+            <Text bold>Hydration · {r.days === 1 ? 'today' : `last ${r.days} days`}</Text>
+            <Text dimColor>
+              {r.today.drinks} of {GOAL} glasses today{r.lastSip ? `, last one ${r.lastSip}` : ''} · rank: {r.rank.name.toLowerCase()} {r.rank.emoji}
+            </Text>
+          </Box>
+        </Box>
+
+        <Box flexDirection="row" gap={3} flexWrap="wrap">
+          {stat('streak', `${r.streak} day${r.streak === 1 ? '' : 's'}`, `streak (best ${r.best})`)}
+          {stat('yes', r.yesRate === null ? '-' : `${r.yesRate}%`, 'said yes')}
+          {stat('water', `${r.litres.toFixed(1)} L`, `${r.windowDrinks} glasses`)}
+          {stat('avg', r.perDay.toFixed(1), 'per day')}
+          {stat('skips', String(r.windowSkips), 'not yet')}
+        </Box>
+
+        <Box flexDirection="column">
+          <Text dimColor>glasses per day{r.windowSkips > 0 ? ' (outline = not yet)' : ''}</Text>
+          {hasSvg ? <els.Svg source={days.source} alt="Glasses per day" width={days.width} height={days.height} /> : textChart}
+        </Box>
+
+        <Box flexDirection="column">
+          <Text dimColor>by hour of day</Text>
+          {hasSvg ? <els.Svg source={hours.source} alt="Glasses by hour of day" width={hours.width} height={hours.height} /> : textHours}
+        </Box>
+
+        {hasSvg ? (
+          <els.Svg source={factsPic.source} alt={facts(r).map(([k, v]) => `${k}: ${v}`).join(', ')} width={factsPic.width} height={factsPic.height} />
+        ) : (
+          <Box flexDirection="column">
+            <Text dimColor>at a glance</Text>
+            {facts(r).map(([k, v], i) => (
+              <Box key={`f${i}`} flexDirection="row">
+                <Text dimColor>{k.padEnd(19)}</Text>
+                <Text bold color={BLUE}>
+                  {v}
+                </Text>
+              </Box>
+            ))}
+          </Box>
+        )}
+      </Box>
+    )
+  })
+
+  on('command.run', { command: 'water-help' }, async $ => {
+    const muted = await read($, isMuted)
+    return {
+      text: [
+        '### 💧 Water reminder commands',
+        '',
+        '| Command | What it does |',
+        '|---|---|',
+        '| `/water` | Ask the water question now |',
+        '| `/water-status` | When the next reminder is due |',
+        '| `/water-stats [days]` | Charts and analysis of your history (default 7 days, up to 90) |',
+        '| `/water-every <minutes>` | How often to remind |',
+        '| `/water-snooze <minutes>` | How long "Not yet" waits |',
+        '| `/water-pause` · `/water-resume` | Stop or restart reminders |',
+        '| `/water-mute` · `/water-unmute` | Notification sound off or on |',
+        '| `/water-update` | Check for a new version and install it |',
+        '| `/water-help` | This list |',
+        '',
+        `Now: every ${minutes(intervalMin)} · "Not yet" waits ${minutes(snoozeMin)} · ${isPaused ? 'paused' : 'running'} · sound ${muted ? 'off' : 'on'}`,
+      ].join('\n'),
+    }
+  })
+
+  on('command.run', { command: 'water-update' }, async $ => {
+    let current = '0.0.0'
+    try {
+      current = String(JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`)).version ?? current)
+    } catch {
+      // unreadable manifest: anything published counts as newer
+    }
+
+    let latest: string | undefined
+    try {
+      const res = await $.http.fetch(LATEST_MANIFEST)
+      latest = res.ok ? String(JSON.parse(res.text).version) : undefined
+    } catch {
+      latest = undefined
+    }
+    if (latest === undefined) {
+      return say($, "⚠️ Couldn't check for updates: GitHub didn't answer. Try again later.", {
+        kind: 'line',
+        icon: '⚠️',
+        title: "Couldn't check for updates",
+        hint: `GitHub didn't answer. You're on v${current}`,
+        tone: 'orange',
+      })
+    }
+    if (compareVersions(latest, current) <= 0) {
+      return say($, `✅ water-reminder is up to date (v${current}).`, {
+        kind: 'line',
+        icon: '✅',
+        title: `Up to date: v${current}`,
+        hint: 'Nothing new on GitHub',
+        tone: 'blue',
+      })
+    }
+
+    const refreshed = await claudeCli($, ['plugin', 'marketplace', 'update', MARKETPLACE]).catch(() => undefined)
+    const updated = await claudeCli($, ['plugin', 'update', PLUGIN_ID]).catch(() => undefined)
+    if (refreshed?.exitCode !== 0 || updated?.exitCode !== 0) {
+      const why = firstLine(updated?.stderr || updated?.stdout || refreshed?.stderr || '') || "the claude command didn't run"
+      return say($, `⚠️ v${latest} is out but the update failed: ${why}\nRun it yourself: claude plugin update ${PLUGIN_ID}`, {
+        kind: 'line',
+        icon: '⚠️',
+        title: `v${latest} is out, but the update failed`,
+        hint: `${why} · run: claude plugin update ${PLUGIN_ID}`,
+        tone: 'orange',
+      })
+    }
+    return say($, `⬆️ Updated water-reminder v${current} → v${latest}. Start a new session to use it.`, {
+      kind: 'line',
+      icon: '⬆️',
+      title: `Updated: v${current} → v${latest}`,
+      hint: 'Start a new session to use it',
+      tone: 'blue',
+    })
   })
 
   on('command.run', { command: 'water-mute' }, async $ => {
     await update($, isMuted, () => true)
     await $.store.set('isMuted', true)
-    return { text: '🔇 Water reminder sound off.' }
+    return say($, '🔇 Water reminder sound off.', { kind: 'line', icon: '🔇', title: 'Sound off', hint: 'Reminders still pop up, just quietly. /water-unmute to undo', tone: 'dim' })
   })
 
   on('command.run', { command: 'water-unmute' }, async $ => {
     await update($, isMuted, () => false)
     await $.store.set('isMuted', false)
-    return { text: '🔊 Water reminder sound on.' }
+    return say($, '🔊 Water reminder sound on.', { kind: 'line', icon: '🔊', title: 'Sound on', hint: 'Each reminder plays a chime again', tone: 'blue' })
+  })
+
+  // every water command's row except /water-stats' report, styled
+  on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => {
+    if (!e.props.command.startsWith('water') || e.props.command === 'water-stats' || e.props.isErrored) {
+      return next(e)
+    }
+    // the help table: drawn as markdown, the way an assistant reply is
+    if (e.props.command === 'water-help') {
+      const els = $.ui.resolve(e)
+      return 'Markdown' in els ? <els.Markdown key="water-help" text={e.props.text.replace(/^water-reminder: /, "")} /> : next(e)
+    }
+    const note = noteFor(await read($, notes), e.props.text)
+    return note ? drawNote($.ui.resolve(e), note) : next(e)
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -301,6 +1079,7 @@ export const register: Register = on => {
         alt="Claude critter holding a water bottle"
         width={SPRITE_W}
         height={SPRITE_H}
+        isInteractive
       />
     ) : (
       <Box flexDirection="column">

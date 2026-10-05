@@ -17,14 +17,17 @@ On **Windows**, each reminder also shows a system notification with a sound, so 
 |---|---|
 | `/water` | Ask the water question right now |
 | `/water-status` | Show when the next reminder is due and your settings |
+| `/water-stats [days]` | Chart of drinks vs. "Not yet" per day, your daily rhythm, streaks and a hydration rank (default 7 days) |
 | `/water-pause` | Pause reminders |
 | `/water-resume` | Resume reminders |
 | `/water-every <minutes>` | Remind every N minutes (default 60) |
 | `/water-snooze <minutes>` | How long "Not yet" waits (default 5) |
 | `/water-mute` | Turn off the notification sound |
 | `/water-unmute` | Turn the notification sound back on |
+| `/water-help` | List all commands and your current settings |
+| `/water-update` | Check GitHub for a newer version and install it (then start a new session) |
 
-Interval, snooze length, pause and mute are remembered across sessions.
+Interval, snooze length, pause, mute and your answer history are remembered across sessions.
 
 ## Requirements
 

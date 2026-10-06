@@ -36,7 +36,13 @@ function world(on: On, files: Record<string, string> = {}, opts: { latest?: stri
   })
   on('process.run', (_$, e) => {
     runs.push([...e.argv])
-    return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    // claude plugin update says what it did, as the real one does
+    const stdout = !e.argv.includes('water-reminder@claude-water-reminder')
+      ? ''
+      : opts.latest === undefined
+        ? 'water-reminder is already at the latest version (0.9.2).'
+        : `✔ Plugin "water-reminder" updated from 0.9.2 to ${opts.latest} for scope user. Restart to apply changes.`
+    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('http.fetch', () => ({
     value:
@@ -260,12 +266,13 @@ describe('goal and stats', () => {
 })
 
 describe('/water-update', () => {
-  test('says up to date when GitHub has no newer version', async ($, on) => {
-    const w = world(on, {}, { latest: '0.5.0' })
+  test('says up to date when claude plugin update finds nothing newer', async ($, on) => {
+    const w = world(on)
     await startSession($)
 
     expect(await run($, 'water-update')).toContain('up to date')
-    expect(w.runs.some(argv => argv.includes('update'))).toBe(false)
+    expect(w.runs).toContainEqual(['claude', 'plugin', 'marketplace', 'update', 'claude-water-reminder'])
+    expect(w.runs).toContainEqual(['claude', 'plugin', 'update', 'water-reminder@claude-water-reminder'])
   })
 
   test('installs a newer version through claude plugin update', async ($, on) => {

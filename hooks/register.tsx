@@ -12,40 +12,15 @@ const ORANGE = '#D97757'
 const BLUE = '#3BA7E0'
 
 // ── Windows notification (shown even while Claude is minimized) ──
-// PowerShell's variable sigil, made from its character code so that no `$` in
-// this file is anything but the engine interface (the Claude directory reads them all)
-const PS = String.fromCharCode(36)
-
-function notifyScript(isMuted: boolean): string {
-  const audio = isMuted ? '<audio silent="true"/>' : '<audio src="ms-winsoundevent:Notification.Reminder"/>'
-  return [
-    '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null',
-    '[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null',
-    `${PS}x = New-Object Windows.Data.Xml.Dom.XmlDocument`,
-    `${PS}x.LoadXml('<toast><visual><binding template="ToastGeneric"><text>Water break</text><text>Have you drunk water? Answer in Claude.</text></binding></visual>${audio}</toast>')`,
-    `${PS}t = [Windows.UI.Notifications.ToastNotification]::new(${PS}x)`,
-    `[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show(${PS}t)`,
-  ].join('; ')
-}
-
-const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-
-// PowerShell -EncodedCommand takes base64 of UTF-16LE.
-function encodeCommand(script: string): string {
-  const bytes: number[] = []
-  for (let i = 0; i < script.length; i++) {
-    const c = script.charCodeAt(i)
-    bytes.push(c & 0xff, c >> 8)
-  }
-  let out = ''
-  for (let i = 0; i < bytes.length; i += 3) {
-    const n = (bytes[i] << 16) | ((bytes[i + 1] ?? 0) << 8) | (bytes[i + 2] ?? 0)
-    out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63]
-    out += i + 1 < bytes.length ? B64[(n >> 6) & 63] : '='
-    out += i + 2 < bytes.length ? B64[n & 63] : '='
-  }
-  return out
-}
+// Each reminder runs one of two fixed commands: PowerShell's -EncodedCommand
+// (base64 of UTF-16LE) of this script, as is, or with its <audio> made
+// <audio silent="true"/> once /water-mute is on. The script, one statement a line:
+//   [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+//   [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
+//   $x = New-Object Windows.Data.Xml.Dom.XmlDocument
+//   $x.LoadXml('<toast><visual><binding template="ToastGeneric"><text>Water break</text><text>Have you drunk water? Answer in Claude.</text></binding></visual><audio src="ms-winsoundevent:Notification.Reminder"/></toast>')
+//   $t = [Windows.UI.Notifications.ToastNotification]::new($x)
+//   [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe').Show($t)
 
 // ── State ─────────────────────────────────────────────────────────
 // ── Session state ($.state) ───────────────────────────────────────
@@ -891,8 +866,11 @@ async function ask($: EngineInterface, notify: boolean) {
   // a write from a timer can miss the band's redraw while a turn is streaming
   $.ui.invalidate('ui.render')
   if (notify) {
-    const script = notifyScript(await read($, 'isMuted'))
-    void $.process.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodeCommand(script)]).catch(() => undefined)
+    if (await read($, 'isMuted')) {
+      void $.process.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', 'WwBXAGkAbgBkAG8AdwBzAC4AVQBJAC4ATgBvAHQAaQBmAGkAYwBhAHQAaQBvAG4AcwAuAFQAbwBhAHMAdABOAG8AdABpAGYAaQBjAGEAdABpAG8AbgBNAGEAbgBhAGcAZQByACwAIABXAGkAbgBkAG8AdwBzAC4AVQBJAC4ATgBvAHQAaQBmAGkAYwBhAHQAaQBvAG4AcwAsACAAQwBvAG4AdABlAG4AdABUAHkAcABlACAAPQAgAFcAaQBuAGQAbwB3AHMAUgB1AG4AdABpAG0AZQBdACAAfAAgAE8AdQB0AC0ATgB1AGwAbAA7ACAAWwBXAGkAbgBkAG8AdwBzAC4ARABhAHQAYQAuAFgAbQBsAC4ARABvAG0ALgBYAG0AbABEAG8AYwB1AG0AZQBuAHQALAAgAFcAaQBuAGQAbwB3AHMALgBEAGEAdABhAC4AWABtAGwALgBEAG8AbQAuAFgAbQBsAEQAbwBjAHUAbQBlAG4AdAAsACAAQwBvAG4AdABlAG4AdABUAHkAcABlACAAPQAgAFcAaQBuAGQAbwB3AHMAUgB1AG4AdABpAG0AZQBdACAAfAAgAE8AdQB0AC0ATgB1AGwAbAA7ACAAJAB4ACAAPQAgAE4AZQB3AC0ATwBiAGoAZQBjAHQAIABXAGkAbgBkAG8AdwBzAC4ARABhAHQAYQAuAFgAbQBsAC4ARABvAG0ALgBYAG0AbABEAG8AYwB1AG0AZQBuAHQAOwAgACQAeAAuAEwAbwBhAGQAWABtAGwAKAAnADwAdABvAGEAcwB0AD4APAB2AGkAcwB1AGEAbAA+ADwAYgBpAG4AZABpAG4AZwAgAHQAZQBtAHAAbABhAHQAZQA9ACIAVABvAGEAcwB0AEcAZQBuAGUAcgBpAGMAIgA+ADwAdABlAHgAdAA+AFcAYQB0AGUAcgAgAGIAcgBlAGEAawA8AC8AdABlAHgAdAA+ADwAdABlAHgAdAA+AEgAYQB2AGUAIAB5AG8AdQAgAGQAcgB1AG4AawAgAHcAYQB0AGUAcgA/ACAAQQBuAHMAdwBlAHIAIABpAG4AIABDAGwAYQB1AGQAZQAuADwALwB0AGUAeAB0AD4APAAvAGIAaQBuAGQAaQBuAGcAPgA8AC8AdgBpAHMAdQBhAGwAPgA8AGEAdQBkAGkAbwAgAHMAaQBsAGUAbgB0AD0AIgB0AHIAdQBlACIALwA+ADwALwB0AG8AYQBzAHQAPgAnACkAOwAgACQAdAAgAD0AIABbAFcAaQBuAGQAbwB3AHMALgBVAEkALgBOAG8AdABpAGYAaQBjAGEAdABpAG8AbgBzAC4AVABvAGEAcwB0AE4AbwB0AGkAZgBpAGMAYQB0AGkAbwBuAF0AOgA6AG4AZQB3ACgAJAB4ACkAOwAgAFsAVwBpAG4AZABvAHcAcwAuAFUASQAuAE4AbwB0AGkAZgBpAGMAYQB0AGkAbwBuAHMALgBUAG8AYQBzAHQATgBvAHQAaQBmAGkAYwBhAHQAaQBvAG4ATQBhAG4AYQBnAGUAcgBdADoAOgBDAHIAZQBhAHQAZQBUAG8AYQBzAHQATgBvAHQAaQBmAGkAZQByACgAJwB7ADEAQQBDADEANABFADcANwAtADAAMgBFADcALQA0AEUANQBEAC0AQgA3ADQANAAtADIARQBCADEAQQBFADUAMQA5ADgAQgA3AH0AXABXAGkAbgBkAG8AdwBzAFAAbwB3AGUAcgBTAGgAZQBsAGwAXAB2ADEALgAwAFwAcABvAHcAZQByAHMAaABlAGwAbAAuAGUAeABlACcAKQAuAFMAaABvAHcAKAAkAHQAKQA=']).catch(() => undefined)
+    } else {
+      void $.process.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', 'WwBXAGkAbgBkAG8AdwBzAC4AVQBJAC4ATgBvAHQAaQBmAGkAYwBhAHQAaQBvAG4AcwAuAFQAbwBhAHMAdABOAG8AdABpAGYAaQBjAGEAdABpAG8AbgBNAGEAbgBhAGcAZQByACwAIABXAGkAbgBkAG8AdwBzAC4AVQBJAC4ATgBvAHQAaQBmAGkAYwBhAHQAaQBvAG4AcwAsACAAQwBvAG4AdABlAG4AdABUAHkAcABlACAAPQAgAFcAaQBuAGQAbwB3AHMAUgB1AG4AdABpAG0AZQBdACAAfAAgAE8AdQB0AC0ATgB1AGwAbAA7ACAAWwBXAGkAbgBkAG8AdwBzAC4ARABhAHQAYQAuAFgAbQBsAC4ARABvAG0ALgBYAG0AbABEAG8AYwB1AG0AZQBuAHQALAAgAFcAaQBuAGQAbwB3AHMALgBEAGEAdABhAC4AWABtAGwALgBEAG8AbQAuAFgAbQBsAEQAbwBjAHUAbQBlAG4AdAAsACAAQwBvAG4AdABlAG4AdABUAHkAcABlACAAPQAgAFcAaQBuAGQAbwB3AHMAUgB1AG4AdABpAG0AZQBdACAAfAAgAE8AdQB0AC0ATgB1AGwAbAA7ACAAJAB4ACAAPQAgAE4AZQB3AC0ATwBiAGoAZQBjAHQAIABXAGkAbgBkAG8AdwBzAC4ARABhAHQAYQAuAFgAbQBsAC4ARABvAG0ALgBYAG0AbABEAG8AYwB1AG0AZQBuAHQAOwAgACQAeAAuAEwAbwBhAGQAWABtAGwAKAAnADwAdABvAGEAcwB0AD4APAB2AGkAcwB1AGEAbAA+ADwAYgBpAG4AZABpAG4AZwAgAHQAZQBtAHAAbABhAHQAZQA9ACIAVABvAGEAcwB0AEcAZQBuAGUAcgBpAGMAIgA+ADwAdABlAHgAdAA+AFcAYQB0AGUAcgAgAGIAcgBlAGEAawA8AC8AdABlAHgAdAA+ADwAdABlAHgAdAA+AEgAYQB2AGUAIAB5AG8AdQAgAGQAcgB1AG4AawAgAHcAYQB0AGUAcgA/ACAAQQBuAHMAdwBlAHIAIABpAG4AIABDAGwAYQB1AGQAZQAuADwALwB0AGUAeAB0AD4APAAvAGIAaQBuAGQAaQBuAGcAPgA8AC8AdgBpAHMAdQBhAGwAPgA8AGEAdQBkAGkAbwAgAHMAcgBjAD0AIgBtAHMALQB3AGkAbgBzAG8AdQBuAGQAZQB2AGUAbgB0ADoATgBvAHQAaQBmAGkAYwBhAHQAaQBvAG4ALgBSAGUAbQBpAG4AZABlAHIAIgAvAD4APAAvAHQAbwBhAHMAdAA+ACcAKQA7ACAAJAB0ACAAPQAgAFsAVwBpAG4AZABvAHcAcwAuAFUASQAuAE4AbwB0AGkAZgBpAGMAYQB0AGkAbwBuAHMALgBUAG8AYQBzAHQATgBvAHQAaQBmAGkAYwBhAHQAaQBvAG4AXQA6ADoAbgBlAHcAKAAkAHgAKQA7ACAAWwBXAGkAbgBkAG8AdwBzAC4AVQBJAC4ATgBvAHQAaQBmAGkAYwBhAHQAaQBvAG4AcwAuAFQAbwBhAHMAdABOAG8AdABpAGYAaQBjAGEAdABpAG8AbgBNAGEAbgBhAGcAZQByAF0AOgA6AEMAcgBlAGEAdABlAFQAbwBhAHMAdABOAG8AdABpAGYAaQBlAHIAKAAnAHsAMQBBAEMAMQA0AEUANwA3AC0AMAAyAEUANwAtADQARQA1AEQALQBCADcANAA0AC0AMgBFAEIAMQBBAEUANQAxADkAOABCADcAfQBcAFcAaQBuAGQAbwB3AHMAUABvAHcAZQByAFMAaABlAGwAbABcAHYAMQAuADAAXABwAG8AdwBlAHIAcwBoAGUAbABsAC4AZQB4AGUAJwApAC4AUwBoAG8AdwAoACQAdAApAA==']).catch(() => undefined)
+    }
   }
 }
 
@@ -1068,31 +1046,29 @@ async function startSchedule($: EngineInterface) {
 
 // ── Updates ───────────────────────────────────────────────────────
 const PLUGIN_ID = 'water-reminder@claude-water-reminder'
-const MARKETPLACE = 'claude-water-reminder'
 // This release, as plugin.json states it; bumped with plugin.json at every release
 const VERSION = '0.9.2'
 const AUTHOR = 'Yossi Abutbul'
 const REPO = 'https://github.com/YossiAbutbul/claude-water-reminder'
 const LICENSE = 'MIT'
 
-// "0.10.1" vs "0.9.3": positive when a is newer
-function compareVersions(a: string, b: string): number {
-  const pa = a.split('.').map(n => parseInt(n, 10) || 0)
-  const pb = b.split('.').map(n => parseInt(n, 10) || 0)
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const d = (pa[i] ?? 0) - (pb[i] ?? 0)
-    if (d !== 0) return d
-  }
-  return 0
-}
 
 // `claude` is a .cmd shim on Windows, which only starts through cmd.exe
-async function claudeCli($: EngineInterface, args: string[]) {
-  const init = { timeoutMs: 3 * MINUTE }
+// /water-update's two commands, each written out whole. On Windows an npm
+// install of Claude Code is a claude.cmd shim, which only cmd.exe starts
+async function refreshMarketplace($: EngineInterface) {
   try {
-    return await $.process.run(['claude', ...args], init)
+    return await $.process.run(['claude', 'plugin', 'marketplace', 'update', 'claude-water-reminder'], { timeoutMs: 180000 })
   } catch {
-    return await $.process.run(['cmd.exe', '/d', '/c', 'claude', ...args], init)
+    return await $.process.run(['cmd.exe', '/d', '/c', 'claude', 'plugin', 'marketplace', 'update', 'claude-water-reminder'], { timeoutMs: 180000 })
+  }
+}
+
+async function updatePlugin($: EngineInterface) {
+  try {
+    return await $.process.run(['claude', 'plugin', 'update', 'water-reminder@claude-water-reminder'], { timeoutMs: 180000 })
+  } catch {
+    return await $.process.run(['cmd.exe', '/d', '/c', 'claude', 'plugin', 'update', 'water-reminder@claude-water-reminder'], { timeoutMs: 180000 })
   }
 }
 
@@ -1724,52 +1700,36 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'water-update' }, async $ => {
-    const current = VERSION
-    let latest: string | undefined
-    try {
-      // the newest release's manifest on GitHub; nothing is sent but the request
-      const res = await $.http.fetch('https://raw.githubusercontent.com/YossiAbutbul/claude-water-reminder/main/.claude-plugin/plugin.json')
-      latest = res.ok ? String(JSON.parse(res.text).version) : undefined
-    } catch {
-      latest = undefined
-    }
-    if (latest === undefined) {
-      return say($, "⚠️ Couldn't check for updates: GitHub didn't answer. Try again later.", {
+    // claude plugin update is the check: it says whether a newer version was installed
+    const refreshed = await refreshMarketplace($).catch(() => undefined)
+    const updated = await updatePlugin($).catch(() => undefined)
+    const out = `${updated?.stdout ?? ''}\n${updated?.stderr ?? ''}`
+    const to = /updated from \S+ to v?([\w.-]+)/i.exec(out)?.[1]
+    if (refreshed?.exitCode === 0 && updated?.exitCode === 0 && to) {
+      return say($, `⬆️ Updated water-reminder v${VERSION} → v${to}. Start a new session to use it.`, {
         kind: 'line',
-        icon: '⚠️',
-        title: "Couldn't check for updates",
-        hint: `GitHub didn't answer. You're on v${current}`,
-        tone: 'orange',
+        icon: '⬆️',
+        title: `Updated: v${VERSION} → v${to}`,
+        hint: 'Start a new session to use it',
+        tone: 'blue',
       })
     }
-    if (compareVersions(latest, current) <= 0) {
-      return say($, `✅ water-reminder is up to date (v${current}).`, {
+    if (updated?.exitCode === 0 && /already at the latest version/i.test(out)) {
+      return say($, `✅ water-reminder is up to date (v${VERSION}).`, {
         kind: 'line',
         icon: '✅',
-        title: `Up to date: v${current}`,
+        title: `Up to date: v${VERSION}`,
         hint: 'Nothing new on GitHub',
         tone: 'blue',
       })
     }
-
-    const refreshed = await claudeCli($, ['plugin', 'marketplace', 'update', MARKETPLACE]).catch(() => undefined)
-    const updated = await claudeCli($, ['plugin', 'update', PLUGIN_ID]).catch(() => undefined)
-    if (refreshed?.exitCode !== 0 || updated?.exitCode !== 0) {
-      const why = firstLine(updated?.stderr || updated?.stdout || refreshed?.stderr || '') || "the claude command didn't run"
-      return say($, `⚠️ v${latest} is out but the update failed: ${why}\nRun it yourself: claude plugin update ${PLUGIN_ID}`, {
-        kind: 'line',
-        icon: '⚠️',
-        title: `v${latest} is out, but the update failed`,
-        hint: `${why} · run: claude plugin update ${PLUGIN_ID}`,
-        tone: 'orange',
-      })
-    }
-    return say($, `⬆️ Updated water-reminder v${current} → v${latest}. Start a new session to use it.`, {
+    const why = firstLine(updated?.stderr || updated?.stdout || refreshed?.stderr || '') || "the claude command didn't run"
+    return say($, `⚠️ Couldn't update water-reminder: ${why}\nRun it yourself: claude plugin update ${PLUGIN_ID}`, {
       kind: 'line',
-      icon: '⬆️',
-      title: `Updated: v${current} → v${latest}`,
-      hint: 'Start a new session to use it',
-      tone: 'blue',
+      icon: '⚠️',
+      title: "Couldn't check for an update",
+      hint: `${why} · run: claude plugin update ${PLUGIN_ID}`,
+      tone: 'orange',
     })
   })
 

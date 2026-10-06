@@ -55,6 +55,24 @@ Replies use the plugin's own animated icon set, tinted to match the reply and as
 
 Interval, snooze length, daily goal, quiet hours, pause, mute and your answer history are remembered across sessions. They are kept on your computer only, in `~/.claude/water-reminder/` (`%USERPROFILE%\.claude\water-reminder\` on Windows): `shared.json` for settings and the schedule, `log.json` for your history. Nothing is sent anywhere. Back up that folder if you want to keep your stats when moving to a new computer.
 
+## What the plugin does on your computer
+
+Everything water-reminder does is listed here. It never reads your conversation and never sends your settings, history or anything else you wrote anywhere.
+
+**Files it writes.** Only two, in `~/.claude/water-reminder/` (`%USERPROFILE%\.claude\water-reminder\` on Windows): `shared.json` for your settings and the schedule, which every session reads to stay in step, and `log.json` for your answer history, which `/water-stats` charts. It reads them back and touches nothing else on disk.
+
+**Programs it starts.**
+- On Windows, once per reminder: `powershell.exe -NoProfile -NonInteractive -EncodedCommand <script>`. The script is built into the plugin and only shows the "Water break" notification, with the system's reminder sound unless you ran `/water-mute`. It takes no input from you or the conversation.
+- Only when you run `/water-update` and a newer version exists: `claude plugin marketplace update claude-water-reminder`, then `claude plugin update water-reminder@claude-water-reminder`. If `claude` can't be started directly on Windows, the same two commands run through `cmd.exe /d /c claude …`, which finds the `claude.cmd` shim.
+
+**Network.** Only `/water-update` goes online: one GET request for `https://raw.githubusercontent.com/YossiAbutbul/claude-water-reminder/main/.claude-plugin/plugin.json`, to read the newest version number. The request carries nothing of yours.
+
+**Hooks.**
+- `session.start`: registers the `/water-*` commands and starts the reminder schedule.
+- `turn.start` and `turn.complete`: redraw the reminder above the prompt so it stays on screen while Claude works. They don't read or change the turn.
+- `command.run`: only for the plugin's own `/water-*` commands, which it answers. It never sees or changes any other command, and makes no permission decisions.
+- `ui.render`: draws the reminder card above the prompt (`AbovePrompt`) and the replies of its own commands (`CommandOutput`); every other drawing passes through unchanged.
+
 ## Requirements
 
 - **Claude Code 2.1.286 or newer.** Earlier versions don't support plugin hook modules. Check with `claude --version`. The Claude desktop app keeps its own copy up to date.

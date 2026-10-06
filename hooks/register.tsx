@@ -830,9 +830,7 @@ async function ask($: EngineInterface, notify: boolean) {
   $.ui.invalidate('ui.render')
   if (notify) {
     const script = notifyScript(await read($, isMuted))
-    void $.process
-      .run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodeCommand(script)])
-      .catch(() => undefined)
+    void $.process.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodeCommand(script)]).catch(() => undefined)
   }
 }
 
@@ -1009,7 +1007,11 @@ async function startSchedule($: EngineInterface) {
 // ── Updates ───────────────────────────────────────────────────────
 const PLUGIN_ID = 'water-reminder@claude-water-reminder'
 const MARKETPLACE = 'claude-water-reminder'
-const LATEST_MANIFEST = 'https://raw.githubusercontent.com/YossiAbutbul/claude-water-reminder/main/.claude-plugin/plugin.json'
+// This release, as plugin.json states it; bumped with plugin.json at every release
+const VERSION = '0.9.2'
+const AUTHOR = 'Yossi Abutbul'
+const REPO = 'https://github.com/YossiAbutbul/claude-water-reminder'
+const LICENSE = 'MIT'
 
 // "0.10.1" vs "0.9.3": positive when a is newer
 function compareVersions(a: string, b: string): number {
@@ -1660,16 +1662,11 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'water-update' }, async $ => {
-    let current = '0.0.0'
-    try {
-      current = String(JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`)).version ?? current)
-    } catch {
-      // unreadable manifest: anything published counts as newer
-    }
-
+    const current = VERSION
     let latest: string | undefined
     try {
-      const res = await $.http.fetch(LATEST_MANIFEST)
+      // the newest release's manifest on GitHub; nothing is sent but the request
+      const res = await $.http.fetch('https://raw.githubusercontent.com/YossiAbutbul/claude-water-reminder/main/.claude-plugin/plugin.json')
       latest = res.ok ? String(JSON.parse(res.text).version) : undefined
     } catch {
       latest = undefined
@@ -1715,17 +1712,8 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'water-version' }, async $ => {
-    let manifest: { version?: string; author?: { name?: string }; repository?: string; license?: string } = {}
-    try {
-      manifest = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`))
-    } catch {
-      // unreadable manifest: show what we can
-    }
-    const version = manifest.version ?? 'unknown'
-    const author = manifest.author?.name ?? 'Yossi Abutbul'
-    const repo = manifest.repository ?? 'https://github.com/YossiAbutbul/claude-water-reminder'
-    const license = manifest.license ?? 'MIT'
-    const copyright = `© 2026 ${author} · ${license} License`
+    const [version, author, repo] = [VERSION, AUTHOR, REPO]
+    const copyright = `© 2026 ${author} · ${LICENSE} License`
     return say($, `💧 water-reminder v${version}\nMade by ${author}\n${repo}\n${copyright}`, {
       kind: 'about',
       version,

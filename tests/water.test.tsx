@@ -260,7 +260,7 @@ describe('goal and stats', () => {
 })
 
 describe('/water-update', () => {
-  test('says up to date when GitHub has the same version', async ($, on) => {
+  test('says up to date when GitHub has no newer version', async ($, on) => {
     const w = world(on, {}, { latest: '0.5.0' })
     await startSession($)
 
@@ -269,10 +269,10 @@ describe('/water-update', () => {
   })
 
   test('installs a newer version through claude plugin update', async ($, on) => {
-    const w = world(on, {}, { latest: '0.10.0' })
+    const w = world(on, {}, { latest: '99.0.0' })
     await startSession($)
 
-    expect(await run($, 'water-update')).toContain('v0.5.0 → v0.10.0')
+    expect(await run($, 'water-update')).toMatch(/v\d+\.\d+\.\d+ → v99\.0\.0/)
     expect(w.runs.some(argv => argv.includes('water-reminder@claude-water-reminder'))).toBe(true)
   })
 })

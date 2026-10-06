@@ -13,15 +13,19 @@ const ORANGE = '#D97757'
 const BLUE = '#3BA7E0'
 
 // ── Windows notification (shown even while Claude is minimized) ──
+// PowerShell's variable sigil, made from its character code so that no `$` in
+// this file is anything but the engine interface (the Claude directory reads them all)
+const PS = String.fromCharCode(36)
+
 function notifyScript(isMuted: boolean): string {
   const audio = isMuted ? '<audio silent="true"/>' : '<audio src="ms-winsoundevent:Notification.Reminder"/>'
   return [
     '[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null',
     '[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null',
-    '$x = New-Object Windows.Data.Xml.Dom.XmlDocument',
-    `$x.LoadXml('<toast><visual><binding template="ToastGeneric"><text>Water break</text><text>Have you drunk water? Answer in Claude.</text></binding></visual>${audio}</toast>')`,
-    '$t = [Windows.UI.Notifications.ToastNotification]::new($x)',
-    "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show($t)",
+    `${PS}x = New-Object Windows.Data.Xml.Dom.XmlDocument`,
+    `${PS}x.LoadXml('<toast><visual><binding template="ToastGeneric"><text>Water break</text><text>Have you drunk water? Answer in Claude.</text></binding></visual>${audio}</toast>')`,
+    `${PS}t = [Windows.UI.Notifications.ToastNotification]::new(${PS}x)`,
+    `[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show(${PS}t)`,
   ].join('; ')
 }
 

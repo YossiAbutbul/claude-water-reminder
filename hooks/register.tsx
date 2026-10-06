@@ -1041,7 +1041,7 @@ async function startSchedule($: EngineInterface) {
 // ── Updates ───────────────────────────────────────────────────────
 const PLUGIN_ID = 'water-reminder@claude-water-reminder'
 // This release, as plugin.json states it; bumped with plugin.json at every release
-const VERSION = '0.9.2'
+const VERSION = '0.9.3'
 const AUTHOR = 'Yossi Abutbul'
 const REPO = 'https://github.com/YossiAbutbul/claude-water-reminder'
 const LICENSE = 'MIT'

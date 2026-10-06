@@ -2,6 +2,18 @@
 
 All notable changes to water-reminder. Versions follow [semantic versioning](https://semver.org): the version in `.claude-plugin/plugin.json` is what `/water-version` shows and what `/water-update` compares against. Each version is tagged in git (`v0.4.1` and so on).
 
+## [0.9.3] - 2026-10-06
+
+Readied for the Claude plugin directory: the plugin does nothing new, and says plainly what it does.
+
+### Changed
+- `/water-update` no longer fetches anything itself: it runs Claude Code's own `claude plugin marketplace update` and `claude plugin update`, and tells from their output whether a newer version was installed. The plugin makes no network requests of its own.
+- The Windows notification runs as plain-text PowerShell (`-Command`), written out at the call in its two forms (with and without sound), instead of an encoded command.
+- The README has a section on what the plugin writes, runs and hooks, and `plugin.json` links to it as the privacy policy. The plugin has an icon, and its description is up to date.
+
+### Fixed
+- Code the directory's checks couldn't follow: no name `h` besides JSX's own, session state read and written through the plugin's own functions, and the version and author kept as constants instead of read from `plugin.json` at run time.
+
 ## [0.9.2] - 2026-10-06
 
 ### Changed
@@ -128,6 +140,7 @@ All notable changes to water-reminder. Versions follow [semantic versioning](htt
 - First release: the Claude critter asks "Have you drunk water?" above the prompt every hour, "Not yet" asks again after 5 minutes, and Windows shows a system notification with a sound.
 - `/water`, `/water-status`, `/water-pause`, `/water-resume`, `/water-every`, `/water-snooze`, `/water-mute`, `/water-unmute`.
 
+[0.9.3]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.8.1...v0.9.0

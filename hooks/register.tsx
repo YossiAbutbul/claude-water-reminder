@@ -142,6 +142,24 @@ const ASKS = [
   'Your critter is getting worried… water please? 🥺',
   'The bottle is right here. Just one sip! 🙏',
 ]
+// /water-help, in order; `args` is what may follow the command, <> when it must
+const HELP: { cmd: string; args?: string; about: string }[] = [
+  { cmd: 'water', about: 'Ask the water question now' },
+  { cmd: 'water-drank', about: 'Log a glass now and restart the countdown' },
+  { cmd: 'water-status', about: 'When the next reminder is due' },
+  { cmd: 'water-stats', args: '[days]', about: 'Charts and analysis of your history (default 7 days, up to 90)' },
+  { cmd: 'water-every', args: '<minutes>', about: 'How often to remind' },
+  { cmd: 'water-snooze', args: '<minutes>', about: 'How long the first snooze button waits (the second waits twice as long)' },
+  { cmd: 'water-goal', args: '<glasses>', about: 'Your daily goal (default 8)' },
+  { cmd: 'water-quiet', args: '<from>-<to>, ... or off', about: 'No reminders between those times, e.g. 18:00-09:00 or 10:00-12:00, 20:00-22:00' },
+  { cmd: 'water-pause', about: 'Stop reminders' },
+  { cmd: 'water-resume', about: 'Start reminders again' },
+  { cmd: 'water-mute', about: 'Notification sound off' },
+  { cmd: 'water-unmute', about: 'Notification sound on' },
+  { cmd: 'water-update', about: 'Check for a new version and install it' },
+  { cmd: 'water-version', about: 'Version, author and repo' },
+]
+
 const YES_REPLIES = ['Nice! 💧', 'Hydrated & happy! ✨', 'Great job! Your critter is proud. 🧡']
 // `n`: the day's goal in glasses
 const GOAL_REPLIES = [
@@ -310,7 +328,7 @@ async function applySettings($: EngineInterface, s: Shared) {
 }
 
 // ── History (shared by every session, in log.json) ────────────────
-// One entry per answer: t = time, d = drank (true) or "Not yet" (false),
+// One entry per answer: t = time, d = drank (true) or snoozed (false),
 // n = how many times it had asked before this answer.
 type LogEntry = { t: number; d: boolean; n: number }
 const LOG_MAX = 5000
@@ -462,7 +480,7 @@ const TREND = { up: 'trending up', down: 'trending down', flat: 'holding steady'
 function insights(r: Report): string[] {
   return [
     r.thirstiest ? `You drink most around ${r.thirstiest}, and most on ${r.bestDay}.` : '',
-    r.snoozeHour ? `"Not yet" comes up most around ${r.snoozeHour}. A bottle on the desk then might help.` : '',
+    r.snoozeHour ? `You snooze most around ${r.snoozeHour}. A bottle on the desk then might help.` : '',
     r.snoozesPerSip ? `${r.snoozesPerSip} snoozes per glass on average.` : '',
     r.firstTryRate !== null ? `Yes on the first ask ${r.firstTryRate}% of the time.` : '',
     r.trend ? `Second half of the period vs first: ${TREND[r.trend]}.` : '',
@@ -478,7 +496,7 @@ function reportText(r: Report): string {
   const width = Math.round(most * scale)
   const chart = r.rows.map(x => {
     const bar = '█'.repeat(Math.round(x.drinks * scale)) + '░'.repeat(Math.round(x.skips * scale))
-    return `${x.label.padEnd(6)} │${bar.padEnd(width)} ${x.drinks} drank, ${x.skips} not yet`
+    return `${x.label.padEnd(6)} │${bar.padEnd(width)} ${x.drinks} drank, ${x.skips} snoozed`
   })
   const peak = Math.max(1, ...r.hours)
   const spark = r.hours.map(n => (n === 0 ? '·' : SPARK[Math.min(7, Math.floor((n / peak) * 7.99))])).join('')
@@ -654,7 +672,7 @@ function goalSvg(): Pic {
 
 const PARTY = goalSvg()
 
-// ── Sad critter ("Not yet"): sighs heavily, sinking onto its legs ─
+// ── Sad critter (a snooze): sighs heavily, sinking onto its legs ──
 const SIGH = '3s'
 const LEGS = new Set(['2,10', '4,10', '7,10', '9,10', '2,11', '4,11', '7,11', '9,11'])
 
@@ -686,7 +704,7 @@ function sadSvg(): Pic {
 
 const SAD = sadSvg()
 
-// Plain columns: drank in blue, "Not yet" stacked on top as an outline, today darker
+// Plain columns: drank in blue, snoozes stacked on top as an outline, today darker
 function dayChartSvg(r: Report): Pic {
   const W = CHART_W
   const H = 150
@@ -769,7 +787,7 @@ function factsSvg(r: Report): Pic {
   const rowH = 46
   const items = facts(r)
   const rows = Math.ceil(items.length / cols)
-  const tip = r.snoozeHour ? `"Not yet" peaks around ${r.snoozeHour}. Keep a bottle within reach then.` : ''
+  const tip = r.snoozeHour ? `Snoozes peak around ${r.snoozeHour}. Keep a bottle within reach then.` : ''
   const H = pad + 18 + rows * rowH + (tip ? 22 : 0) + pad - 8
   const colW = (W - pad * 2) / cols
   const sans = 'font-family="system-ui, -apple-system, Segoe UI, sans-serif"'
@@ -900,7 +918,7 @@ function goalReply(): string {
   return isPaused ? cheer : `${cheer} See you in ${minutes(intervalMin)}.`
 }
 
-// `snooze`: for a "not yet", how many minutes until the question comes back
+// `snooze`: for a snooze, how many minutes until the question comes back
 async function answer($: EngineInterface, drank: boolean, snooze = snoozeMin) {
   await update($, isAsking, () => false)
   replyTimer?.cancel()
@@ -1110,7 +1128,7 @@ function noteFor(all: Record<string, Note>, text: string): Note | undefined {
 }
 
 function settingsLine(s: Settings): string {
-  return `every ${minutes(s.intervalMin)} · "not yet" waits ${minutes(s.snoozeMin)} · goal ${s.goal} a day${s.quiet ? ` · quiet ${s.quiet}` : ''} · sound ${s.muted ? 'off' : 'on'}${s.paused ? ' · paused' : ''}`
+  return `every ${minutes(s.intervalMin)} · snooze ${s.snoozeMin} or ${s.snoozeMin * 2} min · goal ${s.goal} a day${s.quiet ? ` · quiet ${s.quiet}` : ''} · sound ${s.muted ? 'off' : 'on'}${s.paused ? ' · paused' : ''}`
 }
 
 type Els = ReturnType<EngineInterface['ui']['resolve']>
@@ -1312,7 +1330,7 @@ export const register: Register = on => {
     const progress = scheduledMs > 0 ? 1 - leftMs / scheduledMs : 0
     return say(
       $,
-      `💧 Next reminder at ${at} (in ${minutes(leftMin)})\nEvery ${minutes(s.intervalMin)} · "Not yet" waits ${minutes(s.snoozeMin)} · sound ${s.muted ? 'off' : 'on'}`,
+      `💧 Next reminder at ${at} (in ${minutes(leftMin)})\nEvery ${minutes(s.intervalMin)} · snooze ${s.snoozeMin} or ${s.snoozeMin * 2} min · sound ${s.muted ? 'off' : 'on'}`,
       { kind: 'status', state: 'scheduled', at, leftMin, progress, settings: s },
     )
   })
@@ -1372,17 +1390,17 @@ export const register: Register = on => {
       return say($, `Usage: /water-snooze <minutes>, e.g. /water-snooze 10 (now ${minutes(snoozeMin)})`, {
         kind: 'line',
         icon: '⚠️',
-        title: 'How long should "Not yet" wait, in minutes?',
+        title: 'How long should the snooze wait, in minutes?',
         hint: `e.g. /water-snooze 10 · now ${minutes(snoozeMin)}`,
         tone: 'orange',
       })
     }
     snoozeMin = n
     await saveSettings($)
-    return say($, `⏳ "Not yet" now waits ${minutes(n)}.`, {
+    return say($, `⏳ Snooze buttons now wait ${n} and ${n * 2} min.`, {
       kind: 'line',
       icon: '⏳',
-      title: `"Not yet" now waits ${minutes(n)}`,
+      title: `Snooze buttons: ${n} or ${n * 2} min`,
       tone: 'blue',
     })
   })
@@ -1538,7 +1556,7 @@ export const register: Register = on => {
       </Box>
     )
 
-    // terminal: one row per day, █ drank, ░ not yet
+    // terminal: one row per day, █ drank, ░ snoozed
     const most = Math.max(1, ...r.rows.map(x => x.drinks + x.skips))
     const scale = most > 30 ? 30 / most : 1
     const textChart = (
@@ -1594,11 +1612,11 @@ export const register: Register = on => {
           {stat('yes', r.yesRate === null ? '-' : `${r.yesRate}%`, 'said yes')}
           {stat('water', `${r.litres.toFixed(1)} L`, `${r.windowDrinks} glasses`)}
           {stat('avg', r.perDay.toFixed(1), 'per day')}
-          {stat('skips', String(r.windowSkips), 'not yet')}
+          {stat('skips', String(r.windowSkips), 'snoozed')}
         </Box>
 
         <Box flexDirection="column">
-          <Text dimColor>glasses per day{r.windowSkips > 0 ? ' (outline = not yet)' : ''}</Text>
+          <Text dimColor>glasses per day{r.windowSkips > 0 ? ' (outline = snoozed)' : ''}</Text>
           {hasSvg ? <els.Svg source={days.source} alt="Glasses per day" width={days.width} height={days.height} /> : textChart}
         </Box>
 
@@ -1634,21 +1652,9 @@ export const register: Register = on => {
         '',
         '| Command | What it does |',
         '|---|---|',
-        '| `/water` | Ask the water question now |',
-        '| `/water-drank` | Log a glass now and restart the countdown |',
-        '| `/water-status` | When the next reminder is due |',
-        '| `/water-stats [days]` | Charts and analysis of your history (default 7 days, up to 90) |',
-        '| `/water-every <minutes>` | How often to remind |',
-        '| `/water-snooze <minutes>` | How long the first snooze button waits (the second waits twice as long) |',
-        '| `/water-goal <glasses>` | Your daily goal (default 8) |',
-        '| `/water-quiet <from>-<to>, ...` · `off` | No reminders between those times, e.g. 18:00-09:00 or 10:00-12:00, 20:00-22:00 |',
-        '| `/water-pause` · `/water-resume` | Stop or restart reminders |',
-        '| `/water-mute` · `/water-unmute` | Notification sound off or on |',
-        '| `/water-update` | Check for a new version and install it |',
-        '| `/water-version` | Version, author and repo |',
-        '| `/water-help` | This list |',
+        ...HELP.map(h => `| \`/${h.cmd}${h.args ? ` ${h.args}` : ''}\` | ${h.about} |`),
         '',
-        `Now: every ${minutes(intervalMin)} · "Not yet" waits ${minutes(snoozeMin)} · goal ${goal} a day · ${quiet.length ? `quiet ${quietLabel(quiet)}` : 'no quiet hours'} · ${isPaused ? 'paused' : 'running'} · sound ${muted ? 'off' : 'on'}`,
+        `Now: every ${minutes(intervalMin)} · snooze ${snoozeMin} or ${snoozeMin * 2} min · goal ${goal} a day · ${quiet.length ? `quiet ${quietLabel(quiet)}` : 'no quiet hours'} · ${isPaused ? 'paused' : 'running'} · sound ${muted ? 'off' : 'on'}`,
       ].join('\n'),
     }
   })
@@ -1749,6 +1755,38 @@ export const register: Register = on => {
     // the help table: drawn as markdown, the way an assistant reply is
     if (e.props.command === 'water-help') {
       const els = $.ui.resolve(e)
+      if (e.surface === 'desktop') {
+        const { Box, Button, Text } = els
+        const now = e.props.text.split('\n').find(l => l.startsWith('Now: '))
+        // a press puts the command in the prompt box, ready for Enter: a plugin's
+        // own commands don't answer a $.command.run from that plugin
+        const press = (row: (typeof HELP)[number]) =>
+          void $.prompt.fill({ text: `/${row.cmd}${row.args ? ' ' : ''}` }).catch(() => undefined)
+        return (
+          <Box key="water-help" flexDirection="column" gap={0}>
+            <Text bold color={BLUE}>
+              💧 Water reminder commands
+            </Text>
+            <Text dimColor>Press one to put it in the prompt box, then press Enter (add a value first where it needs one)</Text>
+            {HELP.map(row => (
+              <Box key={row.cmd} flexDirection="row" gap={1} alignItems="center" marginTop={1}>
+                <Box width={16}>
+                  <Button key="run" label={`/${row.cmd}`} variant="secondary" onPress={() => press(row)} />
+                </Box>
+                <Text>
+                  {row.args ? <Text dimColor>{`${row.args}  `}</Text> : null}
+                  {row.about}
+                </Text>
+              </Box>
+            ))}
+            {now ? (
+              <Box marginTop={1}>
+                <Text dimColor>{now}</Text>
+              </Box>
+            ) : null}
+          </Box>
+        )
+      }
       return 'Markdown' in els ? <els.Markdown key="water-help" text={e.props.text.replace(/^water-reminder: /, "")} /> : next(e)
     }
     const note = noteFor(await read($, notes), e.props.text)

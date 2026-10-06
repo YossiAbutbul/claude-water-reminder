@@ -409,7 +409,7 @@ describe('critter mood', () => {
     return (svg?.props as { alt?: string } | undefined)?.alt ?? ''
   }
 
-  test('the critter dances after "Yes" and looks sad after "Not yet"', async ($, on) => {
+  test('the critter dances after "Yes" and looks sad after a snooze', async ($, on) => {
     const w = world(on)
     await startSession($)
     await run($, 'water')
@@ -432,6 +432,28 @@ describe('critter mood', () => {
 
     expect(await run($, 'water-drank')).toContain('Daily goal reached')
     expect(await critter($)).toMatch(/confetti/)
+  })
+})
+
+describe('/water-help', () => {
+  const help = ($: Engine, surface: 'terminal' | 'desktop', text: string) =>
+    $.ui.mount({ plugin: PLUGIN, surface, component: 'CommandOutput', props: { command: 'water-help', args: '', text, isErrored: false } })
+
+  test('draws a button per command on desktop and a table in the terminal', async ($, on) => {
+    world(on)
+    await startSession($)
+    const text = await run($, 'water-help')
+    expect(text).toContain('| `/water-drank` |')
+
+    const desktop = await help($, 'desktop', text)
+    for (const label of ['/water-drank', '/water-every', '/water-quiet', '/water-version']) {
+      expect(await desktop.find({ text: label })).toBeDefined()
+    }
+    expect(await desktop.find({ text: /^Now: / })).toBeDefined()
+
+    const terminal = await help($, 'terminal', text)
+    expect(await terminal.find({ type: 'Button' })).toBeUndefined()
+    expect(await terminal.find({ type: 'Markdown' })).toBeDefined()
   })
 })
 

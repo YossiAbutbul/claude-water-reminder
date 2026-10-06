@@ -49,7 +49,7 @@ Replies use the plugin's own animated icon set, tinted to match the reply and as
 | `/water-quiet <from>-<to>, ...` | Quiet hours with no reminders, e.g. `/water-quiet 18:00-09:00`, or several windows separated by commas, e.g. `/water-quiet 10:00-12:00, 20:00-22:00` (up to 6). A reminder that would fall inside them waits until they end. `/water-quiet off` removes them |
 | `/water-mute` | Turn off the notification sound |
 | `/water-unmute` | Turn the notification sound back on |
-| `/water-help` | List all commands and your current settings |
+| `/water-help` | List all commands and your current settings. In the desktop app each command is a button that puts it in the prompt box, ready for Enter |
 | `/water-update` | Check GitHub for a newer version and install it (then start a new session) |
 | `/water-version` | Show the version, the author and a link to this repo |
 

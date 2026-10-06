@@ -2,6 +2,12 @@
 
 All notable changes to water-reminder. Versions follow [semantic versioning](https://semver.org): the version in `.claude-plugin/plugin.json` is what `/water-version` shows and what `/water-update` compares against. Each version is tagged in git (`v0.4.1` and so on).
 
+## [0.9.2] - 2026-10-06
+
+### Changed
+- `/water-help` in the desktop app shows a button for every command: press one to put it in the prompt box, then press Enter (add a value first where it needs one). The terminal keeps the table.
+- The last "Not yet" wording is gone now that there are two snooze buttons: `/water-status` and `/water-help` say "snooze 5 or 10 min", `/water-snooze` replies with both waits, and the stats say "snoozed".
+
 ## [0.9.1] - 2026-10-06
 
 ### Fixed
@@ -121,6 +127,7 @@ All notable changes to water-reminder. Versions follow [semantic versioning](htt
 - First release: the Claude critter asks "Have you drunk water?" above the prompt every hour, "Not yet" asks again after 5 minutes, and Windows shows a system notification with a sound.
 - `/water`, `/water-status`, `/water-pause`, `/water-resume`, `/water-every`, `/water-snooze`, `/water-mute`, `/water-unmute`.
 
+[0.9.2]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.8.0...v0.8.1

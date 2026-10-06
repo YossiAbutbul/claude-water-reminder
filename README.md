@@ -9,7 +9,7 @@ Drank without being asked? `/water-drank` logs the glass and restarts the countd
 
 **Works in the Claude desktop app** (the Code tab) **and in the Claude Code terminal.** In the desktop app the critter is a pixel sprite; in the terminal it's drawn with text characters.
 
-![water-reminder in the Claude desktop app: the reminder, the dancing critter after "Yes", the victory jump for the daily goal, the sighing critter after a snooze, and the Windows notification](docs/preview.svg)
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/preview-dark.svg" /><img src="docs/preview-light.svg" alt="water-reminder in the Claude desktop app: the reminder, the dancing critter after &quot;Yes&quot;, the victory jump for the daily goal, the sighing critter after a snooze, and the Windows notification" /></picture>
 
 On **Windows**, each reminder also shows a system notification with a sound, so you see it even while Claude is minimized.
 
@@ -19,7 +19,7 @@ On **Windows**, each reminder also shows a system notification with a sound, so 
 
 Every answer is logged, and `/water-stats` turns it into a report: the critter takes a swig while you read, glasses per day (the outline on top of a bar is the times you snoozed), what hours you drink at, and an "at a glance" panel with your peak hour, best day, streaks and trend. Your rank goes from 🌵 Cactus to 🐋 Blue Whale.
 
-![/water-stats in the Claude desktop app: the drinking critter, daily and hourly charts, and the at-a-glance panel](docs/stats.svg)
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/stats-dark.svg" /><img src="docs/stats-light.svg" alt="/water-stats in the Claude desktop app: the drinking critter, daily and hourly charts, and the at-a-glance panel" /></picture>
 
 `/water-stats 30` shows the last 30 days (anything from 1 to 90). In the terminal the same report is drawn with text bars.
 
@@ -27,11 +27,11 @@ Every answer is logged, and `/water-stats` turns it into a report: the critter t
 
 `/water-status` shows a countdown to the next water break with a progress bar. `/water-version` shows the version, who made it and a link here. The other commands answer with a short line that says what changed, and `/water-help` lists them all as buttons that put the command in the prompt box.
 
-![/water-status, /water-version, other command replies and the /water-help buttons in the Claude desktop app](docs/commands.svg)
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/commands-dark.svg" /><img src="docs/commands-light.svg" alt="/water-status, /water-version, other command replies and the /water-help buttons in the Claude desktop app" /></picture>
 
 Replies use the plugin's own animated icon set, tinted to match the reply and as tall as it. Each icon keeps moving while it is on screen (the terminal shows emoji instead):
 
-![water-reminder's icon set: one icon per command, at two-row and one-row sizes](docs/icons.svg)
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/icons-dark.svg" /><img src="docs/icons-light.svg" alt="water-reminder's icon set: one icon per command, at two-row and one-row sizes" /></picture>
 
 ## Commands
 

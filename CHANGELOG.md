@@ -2,6 +2,12 @@
 
 All notable changes to water-reminder. Versions follow [semantic versioning](https://semver.org): the version in `.claude-plugin/plugin.json` is what `/water-version` shows and what `/water-update` compares against. Each version is tagged in git (`v0.4.1` and so on).
 
+## [0.9.1] - 2026-10-06
+
+### Fixed
+- The victory jump fits the same frame as the dance, so the card above the prompt keeps its height: a lower hop, the trophy bottle held lower in its hand and the sparkles kept inside.
+- The README's preview image shows the replies' real **Close** button instead of an ✕.
+
 ## [0.9.0] - 2026-10-06
 
 ### Added
@@ -114,6 +120,7 @@ All notable changes to water-reminder. Versions follow [semantic versioning](htt
 - First release: the Claude critter asks "Have you drunk water?" above the prompt every hour, "Not yet" asks again after 5 minutes, and Windows shows a system notification with a sound.
 - `/water`, `/water-status`, `/water-pause`, `/water-resume`, `/water-every`, `/water-snooze`, `/water-mute`, `/water-unmute`.
 
+[0.9.1]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.7.1...v0.8.0

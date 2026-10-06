@@ -625,26 +625,27 @@ const DANCING = danceSvg()
 const HOP = '0.9s'
 
 function goalSvg(): Pic {
+  // the same frame as the dance, so the card keeps its height
   const W = SPRITE_W + 28
-  const H = SPRITE_H + 42
+  const H = SPRITE_H + 26
   const cells = (pick: (c: string) => boolean) =>
     BODY.flatMap((row, y) => [...row].map((c, x) => (pick(c) && COLORS[c] ? px(x, y, COLORS[c]) : ''))).join('')
   const loop = 'repeatCount="indefinite"'
   const ease = (n: number) => `calcMode="spline" keySplines="${Array(n).fill('0.3 0 0.3 1').join(';')}"`
-  let s = svgOpen(W, H, `-14 -38 ${W} ${H}`).replace('<svg ', '<svg shape-rendering="crispEdges" ')
+  let s = svgOpen(W, H, `-14 -22 ${W} ${H}`).replace('<svg ', '<svg shape-rendering="crispEdges" ')
   s += confetti(W, H)
   // sparkles twinkling around it, one after another
-  for (const [x, y, begin] of [[-10, -18, '0s'], [SPRITE_W + 2, -26, '0.3s'], [-6, 30, '0.6s'], [SPRITE_W + 8, 22, '0.9s']] as const) {
+  for (const [x, y, begin] of [[-12, -14, '0s'], [SPRITE_W + 4, -18, '0.3s'], [-10, 30, '0.6s'], [SPRITE_W + 6, 34, '0.9s']] as const) {
     s += `<g fill="#F2C94C" opacity="0"><rect x="${x + 2}" y="${y}" width="2" height="6"/><rect x="${x}" y="${y + 2}" width="6" height="2"/>`
     s += `<animate attributeName="opacity" values="0;1;0" dur="1.2s" begin="${begin}" ${loop}/></g>`
   }
   // the whole critter hops: up fast, a moment in the air, down, a beat on the ground
-  s += `<g><animateTransform attributeName="transform" type="translate" values="0 0;0 -14;0 -14;0 0;0 0" keyTimes="0;0.3;0.42;0.7;1" ${ease(4)} dur="${HOP}" ${loop}/>`
+  s += `<g><animateTransform attributeName="transform" type="translate" values="0 0;0 -8;0 -8;0 0;0 0" keyTimes="0;0.3;0.42;0.7;1" ${ease(4)} dur="${HOP}" ${loop}/>`
   s += cells(c => !BOTTLE.has(c) && c !== 'K')
   // happy ^ ^ eyes the whole time
   s += [[2, 5], [3, 4], [4, 5], [7, 5], [8, 4], [9, 5]].map(([x, y]) => px(x, y, COLORS.K)).join('')
   // the bottle raised a little in its hand like a trophy, waved from side to side
-  s += `<g transform="translate(0 -5)"><g>`
+  s += `<g transform="translate(0 -4)"><g>`
   s += `<animateTransform attributeName="transform" type="rotate" values="-14 ${13 * PX} ${7 * PX};14 ${13 * PX} ${7 * PX};-14 ${13 * PX} ${7 * PX}" ${ease(2)} dur="${HOP}" ${loop}/>`
   s += cells(c => BOTTLE.has(c))
   s += '</g></g></g>'

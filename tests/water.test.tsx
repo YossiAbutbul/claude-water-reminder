@@ -73,11 +73,11 @@ async function startSession($: Engine) {
   await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
 }
 
-// The band above the prompt, as the terminal draws it now
-async function band($: Engine) {
+// The band above the prompt, as the terminal (or the desktop app) draws it now
+async function band($: Engine, surface: 'terminal' | 'desktop' = 'terminal') {
   return $.ui.mount({
     plugin: PLUGIN,
-    surface: 'terminal',
+    surface,
     component: 'AbovePrompt',
     props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 100, scroll: { offset: 0, bodyRows: 19 }, view: {} },
   })
@@ -319,6 +319,28 @@ describe('quiet hours', () => {
     await w.clock.advance(60 * MINUTE)
     expect(await asking($)).toBe(true)
     expect(w.notifications()).toBe(1)
+  })
+})
+
+describe('critter mood', () => {
+  // what the desktop band's critter shows, by its alt text
+  const critter = async ($: Engine) => {
+    const svg = await (await band($, 'desktop')).find({ type: 'Svg' })
+    return (svg?.props as { alt?: string } | undefined)?.alt ?? ''
+  }
+
+  test('the critter dances after "Yes" and looks sad after "Not yet"', async ($, on) => {
+    const w = world(on)
+    await startSession($)
+    await run($, 'water')
+    expect(await critter($)).toBe('Claude critter holding a water bottle')
+    await pressInBand($, 'yes')
+    expect(await critter($)).toMatch(/dancing/)
+
+    await w.clock.advance(60 * MINUTE + 2000)
+    expect(await critter($)).toBe('Claude critter holding a water bottle')
+    await pressInBand($, 'no')
+    expect(await critter($)).toMatch(/sad/)
   })
 })
 

@@ -1,5 +1,7 @@
 export type Nag = number
 
+export type Mood = 'happy' | 'sad' | null
+
 export type Rank = { emoji: string; name: string; blurb: string }
 
 export type DayRow = { label: string; drinks: number; skips: number; isToday: boolean }
@@ -45,6 +47,7 @@ declare module 'claude-code' {
       isMuted: boolean
       nag: Nag
       reply: string | null
+      mood: Mood
       reports: Record<string, Report>
       notes: Record<string, Note>
     }

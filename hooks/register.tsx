@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { DayRow, Note, Rank, Report, Settings } from '../types'
+import type { DayRow, Mood, Note, Rank, Report, Settings } from '../types'
 
 const MINUTE = 60 * 1000
 const DEFAULT_INTERVAL_MIN = 60
@@ -49,6 +49,8 @@ const isAsking = atom({ plugin: 'water-reminder', key: 'isAsking' } as const, fa
 const isMuted = atom({ plugin: 'water-reminder', key: 'isMuted' } as const, false)
 const nag = atom({ plugin: 'water-reminder', key: 'nag' } as const, 0)
 const reply = atom({ plugin: 'water-reminder', key: 'reply' } as const, null as string | null)
+// How the critter feels while the reply shows: dances on "Yes", sad on "Not yet"
+const mood = atom({ plugin: 'water-reminder', key: 'mood' } as const, null as Mood)
 // /water-stats runs this session, by their text
 const reports = atom({ plugin: 'water-reminder', key: 'reports' } as const, {} as Record<string, Report>)
 // other water commands' rows, by their text
@@ -539,6 +541,38 @@ function danceSvg(): Pic {
 
 const DANCING = danceSvg()
 
+// ── Sad critter ("Not yet"): sighs heavily, sinking onto its legs ─
+const SIGH = '3s'
+const LEGS = new Set(['2,10', '4,10', '7,10', '9,10', '2,11', '4,11', '7,11', '9,11'])
+
+function sadSvg(): Pic {
+  const W = SPRITE_W + 10
+  const H = SPRITE_H + 10
+  const cells = (pick: (c: string, x: number, y: number) => boolean) =>
+    BODY.flatMap((row, y) => [...row].map((c, x) => (pick(c, x, y) && COLORS[c] ? px(x, y, COLORS[c]) : ''))).join('')
+  const loop = 'repeatCount="indefinite"'
+  // slow in, slow out: sinks over most of the breath, lifts back a little quicker
+  const sigh = (values: string) =>
+    `<animateTransform attributeName="transform" type="translate" values="${values}" keyTimes="0;0.55;1" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1" dur="${SIGH}" ${loop}/>`
+  let s = svgOpen(W, H, `-4 -4 ${W} ${H}`).replace('<svg ', '<svg shape-rendering="crispEdges" ')
+  // the legs stay planted
+  s += cells((c, x, y) => LEGS.has(`${x},${y}`))
+  // the body sinks onto them with each sigh, then rises again
+  s += `<g>${sigh('0 0;0 4;0 0')}`
+  s += cells((c, x, y) => !BOTTLE.has(c) && c !== 'K' && !LEGS.has(`${x},${y}`))
+  // its usual eyes, looking down a little and blinking slowly
+  s += `<g transform="translate(0 2)">${EYES.map(([x, y]) => px(x, y, COLORS.K)).join('')}`
+  s += `<animate attributeName="opacity" values="1;1;0;0;1" keyTimes="0;0.5;0.56;0.66;0.72" dur="${SIGH}" ${loop}/></g>`
+  // the bottle hangs low from its hand and droops further as it sinks
+  s += `<g transform="translate(0 5)"><g>`
+  s += `<animateTransform attributeName="transform" type="rotate" values="0 ${13 * PX} ${6 * PX};8 ${13 * PX} ${6 * PX};0 ${13 * PX} ${6 * PX}" keyTimes="0;0.55;1" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1" dur="${SIGH}" ${loop}/>`
+  s += cells(c => BOTTLE.has(c))
+  s += '</g></g></g>'
+  return { source: s + '</svg>', width: W, height: H }
+}
+
+const SAD = sadSvg()
+
 // Plain columns: drank in blue, "Not yet" stacked on top as an outline, today darker
 function dayChartSvg(r: Report): Pic {
   const W = CHART_W
@@ -731,6 +765,7 @@ async function answer($: EngineInterface, drank: boolean) {
   if ((s.answeredAt ?? 0) >= askedAtHere) {
     // already answered in another session: don't count it twice
     await update($, nag, () => 0)
+    await update($, mood, () => null)
     await update($, reply, () => 'Already answered in another session ✓')
     if (!isPaused && typeof s.nextAt === 'number') {
       await arm($, s.nextAt, s.scheduledMs ?? s.nextAt - (await $.clock.now()))
@@ -743,9 +778,11 @@ async function answer($: EngineInterface, drank: boolean) {
   if (drank) {
     await update($, nag, () => 0)
     const cheer = YES_REPLIES[Math.floor(Math.random() * YES_REPLIES.length)]
+    await update($, mood, () => 'happy')
     await update($, reply, () => (isPaused ? cheer : `${cheer} See you in ${minutes(intervalMin)}.`))
     await schedule($, intervalMin * MINUTE)
   } else {
+    await update($, mood, () => 'sad')
     await update($, reply, () => (isPaused ? 'OK, reminders are paused.' : `OK, I'll check back in ${minutes(snoozeMin)}. ⏳`))
     await schedule($, snoozeMin * MINUTE)
   }
@@ -1566,14 +1603,13 @@ export const register: Register = on => {
     const { Box, Button, Text } = els
     const hasSvg = 'Svg' in els
 
+    // while the reply shows, the critter dances for a drink and sighs at "Not yet"
+    const feeling = asking ? null : await read($, mood)
+    const pic = feeling === 'happy' ? DANCING : feeling === 'sad' ? SAD : { source: SPRITE_SVG, width: SPRITE_W, height: SPRITE_H }
+    const alt =
+      feeling === 'happy' ? 'Claude critter dancing with its water bottle' : feeling === 'sad' ? 'Claude critter sighing sadly' : 'Claude critter holding a water bottle'
     const critter = hasSvg ? (
-      <els.Svg
-        source={SPRITE_SVG}
-        alt="Claude critter holding a water bottle"
-        width={SPRITE_W}
-        height={SPRITE_H}
-        isInteractive
-      />
+      <els.Svg key={feeling ?? 'idle'} source={pic.source} alt={alt} width={pic.width} height={pic.height} isInteractive />
     ) : (
       <Box flexDirection="column">
         {CRITTER_TEXT.map((line, i) => (

@@ -16,6 +16,12 @@ on:
 permissions:
   contents: write
 
+# A release push sends main (with CHANGELOG.md) and the tag together, starting two runs
+# that would both create the same release. One at a time: the second finds it and edits.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest

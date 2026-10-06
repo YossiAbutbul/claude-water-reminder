@@ -367,9 +367,9 @@ async function readShared($: EngineInterface): Promise<Shared> {
 }
 
 async function writeShared($: EngineInterface, patch: Shared): Promise<Shared> {
-  const next = { ...(await readShared($)), ...patch }
-  await $.fs.write(`${await sharedDir($)}/shared.json`, JSON.stringify(next, null, 2))
-  return next
+  const merged = { ...(await readShared($)), ...patch }
+  await $.fs.write(`${await sharedDir($)}/shared.json`, JSON.stringify(merged, null, 2))
+  return merged
 }
 
 // This session's settings, as every session should see them
@@ -454,12 +454,12 @@ function buildReport(log: LogEntry[], now: number, days: number, goal: number): 
   let drinks = 0
   let skips = 0
   let firstTry = 0
-  for (const e of log) {
-    const k = dayKey(e.t)
-    const date = new Date(e.t)
-    if (e.d) {
+  for (const entry of log) {
+    const k = dayKey(entry.t)
+    const date = new Date(entry.t)
+    if (entry.d) {
       drinks++
-      if (e.n <= 1) firstTry++
+      if (entry.n <= 1) firstTry++
       drinksByDay.set(k, (drinksByDay.get(k) ?? 0) + 1)
       hours[date.getHours()]++
       byWeekday[date.getDay()]++

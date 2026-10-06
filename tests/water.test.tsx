@@ -92,7 +92,7 @@ async function run($: Engine, command: string, args = ''): Promise<string> {
   return (await $.command.run({ command, args })).text ?? ''
 }
 
-async function pressInBand($: Engine, key: 'yes' | 'no') {
+async function pressInBand($: Engine, key: 'yes' | 'snooze' | 'snooze-long') {
   await (await band($)).press({ key })
 }
 
@@ -162,14 +162,34 @@ describe('answers', () => {
     expect(await asking($)).toBe(false)
   })
 
-  test('"Not yet" is logged and asks again after the snooze', async ($, on) => {
+  test('"In 5 min" is logged and asks again after the snooze', async ($, on) => {
     const w = world(on)
     await startSession($)
     await run($, 'water')
-    await pressInBand($, 'no')
+    await pressInBand($, 'snooze')
 
     expect(w.log()[0]?.d).toBe(false)
     expect(w.shared().nextAt).toBe(NOW + 5 * MINUTE)
+  })
+
+  test('"In 10 min" waits twice the snooze', async ($, on) => {
+    const w = world(on)
+    await startSession($)
+    await run($, 'water')
+    await pressInBand($, 'snooze-long')
+
+    expect(w.log()[0]?.d).toBe(false)
+    expect(w.shared().nextAt).toBe(NOW + 10 * MINUTE)
+  })
+
+  test('the snooze buttons follow /water-snooze', async ($, on) => {
+    world(on)
+    await startSession($)
+    await run($, 'water-snooze', '15')
+    await run($, 'water')
+    const b = await band($)
+    expect(await b.find({ text: 'In 15 min' })).toBeDefined()
+    expect(await b.find({ text: 'In 30 min' })).toBeDefined()
   })
 
   test('an answer in another session clears the band here within seconds', async ($, on) => {
@@ -281,6 +301,43 @@ describe('quiet hours', () => {
     }
   })
 
+  test('/water-quiet takes several windows separated by commas', async ($, on) => {
+    const w = world(on)
+    await startSession($)
+
+    expect(await run($, 'water-quiet', '10:00-12:00, 20:00-22:00')).toContain('Quiet hours: 10:00 to 12:00, 20:00 to 22:00')
+    expect(w.shared().quiet).toEqual([
+      { start: 10 * 60, end: 12 * 60 },
+      { start: 20 * 60, end: 22 * 60 },
+    ])
+    expect(await run($, 'water-quiet')).toContain('10:00 to 12:00, 20:00 to 22:00')
+  })
+
+  test('/water-quiet rejects a bad part, too many windows, or the whole day', async ($, on) => {
+    const w = world(on)
+    await startSession($)
+    for (const bad of ['10-12, evening', '10-12,', '1-2, 3-4, 5-6, 7-8, 9-10, 11-12, 13-14', '0-12, 12-0']) {
+      expect(await run($, 'water-quiet', bad)).toContain('Usage')
+    }
+    expect(w.shared().quiet ?? null).toBe(null)
+  })
+
+  test('a reminder walks through windows that touch, to the end of the last', async ($, on) => {
+    const w = world(on)
+    await startSession($) // next reminder at 13:00
+    await run($, 'water-quiet', '12:30-14, 14-15:30, 20-22')
+
+    expect(w.shared().nextAt).toBe(at(5, 15, 30))
+  })
+
+  test('an evening window holds a reminder while a morning one is already over', async ($, on) => {
+    const w = world(on, sharedFile({ ...SETTINGS, quiet: [{ start: 8 * 60, end: 9 * 60 }, { start: 18 * 60, end: 20 * 60 }] }))
+    await startSession($)
+    await run($, 'water-every', '420') // 12:00 + 7 h = 19:00, inside the evening window
+
+    expect(w.shared().nextAt).toBe(at(5, 20))
+  })
+
   test('setting quiet hours moves a reminder already inside them to their end', async ($, on) => {
     const w = world(on)
     await startSession($) // next reminder at 13:00
@@ -322,6 +379,29 @@ describe('quiet hours', () => {
   })
 })
 
+describe('/water-drank', () => {
+  test('logs a glass and restarts the countdown', async ($, on) => {
+    const w = world(on)
+    await startSession($)
+    await w.clock.advance(20 * MINUTE)
+
+    expect(await run($, 'water-drank')).toContain('Glass logged: 1 of 8 today')
+    expect(w.log()).toHaveLength(1)
+    expect(w.log()[0]?.d).toBe(true)
+    expect(w.shared().nextAt).toBe(NOW + 80 * MINUTE)
+  })
+
+  test('answers the question when one is up', async ($, on) => {
+    const w = world(on)
+    await startSession($)
+    await run($, 'water')
+    await run($, 'water-drank')
+
+    expect(await asking($)).toBe(false)
+    expect(w.log()).toHaveLength(1)
+  })
+})
+
 describe('critter mood', () => {
   // what the desktop band's critter shows, by its alt text
   const critter = async ($: Engine) => {
@@ -339,8 +419,19 @@ describe('critter mood', () => {
 
     await w.clock.advance(60 * MINUTE + 2000)
     expect(await critter($)).toBe('Claude critter holding a water bottle')
-    await pressInBand($, 'no')
+    await pressInBand($, 'snooze')
     expect(await critter($)).toMatch(/sad/)
+  })
+
+  test('the glass that reaches the daily goal gets a confetti party', async ($, on) => {
+    world(on)
+    await startSession($)
+    await run($, 'water-goal', '2')
+    expect(await run($, 'water-drank')).toContain('1 of 2')
+    expect(await critter($)).toBe('')
+
+    expect(await run($, 'water-drank')).toContain('Daily goal reached')
+    expect(await critter($)).toMatch(/confetti/)
   })
 })
 

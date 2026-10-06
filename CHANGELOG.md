@@ -2,6 +2,18 @@
 
 All notable changes to water-reminder. Versions follow [semantic versioning](https://semver.org): the version in `.claude-plugin/plugin.json` is what `/water-version` shows and what `/water-update` compares against. Each version is tagged in git (`v0.4.1` and so on).
 
+## [0.9.0] - 2026-10-06
+
+### Added
+- `/water-drank`: log a glass whenever you drink, without waiting for a reminder. It restarts the countdown, and answers the question if one is up.
+- A victory jump for the glass that reaches your daily goal: the critter hops with the bottle held up like a trophy, under sparkles and falling confetti, with a cheerful message picked at random.
+- `/water-quiet` takes several windows separated by commas, such as `/water-quiet 10:00-12:00, 20:00-22:00` (up to 6). Windows that touch are walked through to the end of the last one; windows that cover the whole day are refused.
+
+### Changed
+- "Not yet" is now two buttons, **In 5 min** and **In 10 min**. They follow `/water-snooze`: the first waits that long, the second twice as long.
+- On the hydration check the critter's bottle is empty but for one last drop, and every couple of seconds it gives it a hopeful shake.
+- The README's preview image shows the new buttons, the empty bottle and the victory jump.
+
 ## [0.8.1] - 2026-10-06
 
 ### Changed
@@ -102,6 +114,7 @@ All notable changes to water-reminder. Versions follow [semantic versioning](htt
 - First release: the Claude critter asks "Have you drunk water?" above the prompt every hour, "Not yet" asks again after 5 minutes, and Windows shows a system notification with a sound.
 - `/water`, `/water-status`, `/water-pause`, `/water-resume`, `/water-every`, `/water-snooze`, `/water-mute`, `/water-unmute`.
 
+[0.9.0]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.7.0...v0.7.1

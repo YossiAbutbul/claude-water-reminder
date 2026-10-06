@@ -49,7 +49,7 @@ const isAsking = atom({ plugin: 'water-reminder', key: 'isAsking' } as const, fa
 const isMuted = atom({ plugin: 'water-reminder', key: 'isMuted' } as const, false)
 const nag = atom({ plugin: 'water-reminder', key: 'nag' } as const, 0)
 const reply = atom({ plugin: 'water-reminder', key: 'reply' } as const, null as string | null)
-// How the critter feels while the reply shows: dances on "Yes", sad on "Not yet"
+// How the critter feels while the reply shows: dances on "Yes" (a party for the goal), sad on a snooze
 const mood = atom({ plugin: 'water-reminder', key: 'mood' } as const, null as Mood)
 // /water-stats runs this session, by their text
 const reports = atom({ plugin: 'water-reminder', key: 'reports' } as const, {} as Record<string, Report>)
@@ -101,21 +101,36 @@ function px(x: number, y: number, fill: string): string {
   return `<rect x="${x * PX}" y="${y * PX}" width="${PX}" height="${PX}" fill="${fill}"/>`
 }
 
+// The question's critter: its bottle is empty but for one last drop, and every
+// couple of seconds it gives it a hopeful shake
+const BOTTLE_CELLS = new Set(['C', 'W', 'H', 'B', 'b'])
+const LAST_DROP = '15,8'
+const SHAKE = '2.4s'
+
 const SPRITE_SVG =
   `<svg xmlns="http://www.w3.org/2000/svg" width="${SPRITE_W}" height="${SPRITE_H}" ` +
   `viewBox="0 -6 ${SPRITE_W} ${SPRITE_H}" shape-rendering="crispEdges" style="color-scheme:light dark">` +
   SVG_TRANSPARENT +
   // gentle bob
   '<g><animateTransform attributeName="transform" type="translate" values="0 0;0 -3;0 0" dur="1.8s" repeatCount="indefinite"/>' +
-  BODY.flatMap((row, y) => [...row].map((c, x) => (COLORS[c] ? px(x, y, COLORS[c]) : ''))).join('') +
+  BODY.flatMap((row, y) => [...row].map((c, x) => (COLORS[c] && !BOTTLE_CELLS.has(c) ? px(x, y, COLORS[c]) : ''))).join('') +
   // blinking eyes
   '<g>' +
   EYES.map(([x, y]) => px(x, y, COLORS.K)).join('') +
   '<animate attributeName="opacity" values="1;1;0;1" keyTimes="0;0.92;0.96;1" dur="4s" repeatCount="indefinite"/></g>' +
+  // the empty bottle: water drawn as glass, one drop left at the bottom; still, then a quick shake from the hand
+  '<g>' +
+  `<animateTransform attributeName="transform" type="rotate" values="${[0, 0, -16, 14, -12, 9, -5, 0, 0].map(d => `${d} ${13 * PX} ${7 * PX}`).join(';')}" ` +
+  `keyTimes="0;0.5;0.56;0.62;0.68;0.74;0.8;0.86;1" dur="${SHAKE}" repeatCount="indefinite"/>` +
+  BODY.flatMap((row, y) =>
+    [...row].map((c, x) => {
+      if (!BOTTLE_CELLS.has(c)) return ''
+      const water = c === 'B' || c === 'b'
+      return px(x, y, water && `${x},${y}` !== LAST_DROP ? COLORS.W : COLORS[c])
+    }),
+  ).join('') +
   '</g>' +
-  // droplet sparkling above the bottle
-  `<rect x="${15 * PX}" y="-5" width="3" height="3" fill="${BLUE}">` +
-  '<animate attributeName="opacity" values="0;1;0" dur="1.8s" repeatCount="indefinite"/></rect>' +
+  '</g>' +
   '</svg>'
 
 const CRITTER_TEXT = [' ▐▛███▜▌  🧴', '▝▜█████▛▀▀ ', '  ▘▘ ▝▝    ']
@@ -128,47 +143,92 @@ const ASKS = [
   'The bottle is right here. Just one sip! 🙏',
 ]
 const YES_REPLIES = ['Nice! 💧', 'Hydrated & happy! ✨', 'Great job! Your critter is proud. 🧡']
+// `n`: the day's goal in glasses
+const GOAL_REPLIES = [
+  (n: number) => `🎉 Daily goal reached: ${n} glasses today! You're a hydration hero.`,
+  (n: number) => `🏆 Goal smashed: ${n} of ${n}! Your critter is throwing a party.`,
+  (n: number) => `🌊 That's ${n} glasses! Every cell in your body says thank you.`,
+  (n: number) => `✨ ${n} for ${n}! Best. Water day. Ever.`,
+  (n: number) => `🥳 You did it: ${n} glasses! The bottle is proud of you.`,
+]
 
 // ── Settings (shared by every session, see below) ─────────────────
 let intervalMin = DEFAULT_INTERVAL_MIN
 let snoozeMin = DEFAULT_SNOOZE_MIN
 let isPaused = false
 let goal = DEFAULT_GOAL
-// Quiet hours as minutes after midnight, or null when off; start > end spans midnight
-let quiet: { start: number; end: number } | null = null
+// Quiet hours: windows in minutes after midnight, none when off; start > end spans midnight
+type Window = { start: number; end: number }
+let quiet: Window[] = []
+
+const MAX_WINDOWS = 6
+const DAY_MIN = 24 * 60
 
 function clockLabel(min: number): string {
   return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
 }
 
-function quietLabel(q: { start: number; end: number }): string {
-  return `${clockLabel(q.start)} to ${clockLabel(q.end)}`
+function quietLabel(q: Window[]): string {
+  return q.map(w => `${clockLabel(w.start)} to ${clockLabel(w.end)}`).join(', ')
+}
+
+function inWindow(w: Window, m: number): boolean {
+  return w.start < w.end ? m >= w.start && m < w.end : m >= w.start || m < w.end
+}
+
+function quietWindowAt(t: number): Window | undefined {
+  const d = new Date(t)
+  const m = d.getHours() * 60 + d.getMinutes()
+  return quiet.find(w => inWindow(w, m))
 }
 
 function isQuiet(t: number): boolean {
-  if (!quiet) return false
-  const d = new Date(t)
-  const m = d.getHours() * 60 + d.getMinutes()
-  return quiet.start < quiet.end ? m >= quiet.start && m < quiet.end : m >= quiet.start || m < quiet.end
+  return quietWindowAt(t) !== undefined
 }
 
-// The first moment at or after `t` outside quiet hours
+// The first moment at or after `t` outside quiet hours; windows that touch
+// or overlap are walked through one after another
 function afterQuiet(t: number): number {
-  if (!quiet || !isQuiet(t)) return t
-  const d = new Date(t)
-  const end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), Math.floor(quiet.end / 60), quiet.end % 60).getTime()
-  return end > t ? end : new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, Math.floor(quiet.end / 60), quiet.end % 60).getTime()
+  for (let i = 0; i <= quiet.length; i++) {
+    const w = quietWindowAt(t)
+    if (!w) return t
+    const d = new Date(t)
+    const end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), Math.floor(w.end / 60), w.end % 60).getTime()
+    t = end > t ? end : new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, Math.floor(w.end / 60), w.end % 60).getTime()
+  }
+  return t
 }
 
 // "18:00-09:00", "18-9", "6:30 - 8" → minutes after midnight; undefined when not a window
-function parseQuiet(args: string): { start: number; end: number } | undefined {
-  const m = /^(\d{1,2})(?::(\d{2}))?\s*-\s*(\d{1,2})(?::(\d{2}))?$/.exec(args.trim())
+function parseWindow(text: string): Window | undefined {
+  const m = /^(\d{1,2})(?::(\d{2}))?\s*-\s*(\d{1,2})(?::(\d{2}))?$/.exec(text.trim())
   if (!m) return undefined
   const [h1, m1, h2, m2] = [Number(m[1]), Number(m[2] ?? 0), Number(m[3]), Number(m[4] ?? 0)]
   if (h1 > 23 || h2 > 23 || m1 > 59 || m2 > 59) return undefined
   const start = h1 * 60 + m1
   const end = h2 * 60 + m2
   return start === end ? undefined : { start, end }
+}
+
+// "10:00-12:00, 20:00-22:00" → windows; undefined when any part is not a
+// window, there are too many, or together they leave no time for a reminder
+function parseQuiet(args: string): Window[] | undefined {
+  const windows = args.split(',').map(parseWindow)
+  if (windows.length > MAX_WINDOWS || windows.some(w => !w)) return undefined
+  const all = windows as Window[]
+  for (let m = 0; m < DAY_MIN; m++) {
+    if (!all.some(w => inWindow(w, m))) return all
+  }
+  return undefined
+}
+
+// shared.json keeps one window as a plain object (as before 0.9.0), several as a list
+function toShared(q: Window[]): Window | Window[] | null {
+  return q.length === 0 ? null : q.length === 1 ? q[0] : q
+}
+
+function fromShared(v: Window | Window[] | null): Window[] {
+  return v === null ? [] : Array.isArray(v) ? v : [v]
 }
 
 function minutes(n: number): string {
@@ -194,7 +254,7 @@ type Shared = {
   paused?: boolean
   muted?: boolean
   goal?: number
-  quiet?: { start: number; end: number } | null
+  quiet?: Window | Window[] | null
   nextAt?: number | null // when the next question is due, null while paused or asking
   scheduledMs?: number // how long that wait was, for the status bar
   askedAt?: number // the latest question, from any session
@@ -234,7 +294,7 @@ async function writeShared($: EngineInterface, patch: Shared): Promise<Shared> {
 
 // This session's settings, as every session should see them
 async function saveSettings($: EngineInterface) {
-  await writeShared($, { intervalMin, snoozeMin, goal, quiet, paused: isPaused, muted: await read($, isMuted) })
+  await writeShared($, { intervalMin, snoozeMin, goal, quiet: toShared(quiet), paused: isPaused, muted: await read($, isMuted) })
 }
 
 // Takes another session's settings
@@ -242,7 +302,7 @@ async function applySettings($: EngineInterface, s: Shared) {
   if (typeof s.intervalMin === 'number') intervalMin = s.intervalMin
   if (typeof s.snoozeMin === 'number') snoozeMin = s.snoozeMin
   if (typeof s.goal === 'number') goal = s.goal
-  if (s.quiet !== undefined) quiet = s.quiet
+  if (s.quiet !== undefined) quiet = fromShared(s.quiet)
   isPaused = s.paused === true
   if ((await read($, isMuted)) !== (s.muted === true)) {
     await update($, isMuted, () => s.muted === true)
@@ -539,7 +599,59 @@ function danceSvg(): Pic {
   return { source: s + '</svg>', width: W, height: H }
 }
 
+const CONFETTI = [BLUE, ORANGE, '#F2C94C', '#6FCF97', '#EB5757', '#BB86FC']
+
+// Confetti pieces falling through the dance's frame, each on its own beat
+function confetti(w: number, h: number): string {
+  const loop = 'repeatCount="indefinite"'
+  return Array.from({ length: 22 }, (_, i) => {
+    // golden-ratio steps spread the pieces evenly across the frame
+    const x = Math.round(-12 + ((i * 0.618) % 1) * (w - 6))
+    const dur = (1.4 + (i % 4) * 0.25).toFixed(2)
+    const begin = ((i * 0.23) % 1.6).toFixed(2)
+    const fill = CONFETTI[i % CONFETTI.length]
+    const [cw, ch] = i % 2 ? [3, 5] : [4, 3]
+    return (
+      `<rect x="${x}" y="-22" width="${cw}" height="${ch}" fill="${fill}" opacity="0">` +
+      `<animate attributeName="y" values="-22;${h - 26}" dur="${dur}s" begin="${begin}s" ${loop}/>` +
+      `<animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.1;0.8;1" dur="${dur}s" begin="${begin}s" ${loop}/></rect>`
+    )
+  }).join('')
+}
+
 const DANCING = danceSvg()
+
+// ── Victory jump (the daily goal): hops with the bottle held up like a trophy ─
+const HOP = '0.9s'
+
+function goalSvg(): Pic {
+  const W = SPRITE_W + 28
+  const H = SPRITE_H + 42
+  const cells = (pick: (c: string) => boolean) =>
+    BODY.flatMap((row, y) => [...row].map((c, x) => (pick(c) && COLORS[c] ? px(x, y, COLORS[c]) : ''))).join('')
+  const loop = 'repeatCount="indefinite"'
+  const ease = (n: number) => `calcMode="spline" keySplines="${Array(n).fill('0.3 0 0.3 1').join(';')}"`
+  let s = svgOpen(W, H, `-14 -38 ${W} ${H}`).replace('<svg ', '<svg shape-rendering="crispEdges" ')
+  s += confetti(W, H)
+  // sparkles twinkling around it, one after another
+  for (const [x, y, begin] of [[-10, -18, '0s'], [SPRITE_W + 2, -26, '0.3s'], [-6, 30, '0.6s'], [SPRITE_W + 8, 22, '0.9s']] as const) {
+    s += `<g fill="#F2C94C" opacity="0"><rect x="${x + 2}" y="${y}" width="2" height="6"/><rect x="${x}" y="${y + 2}" width="6" height="2"/>`
+    s += `<animate attributeName="opacity" values="0;1;0" dur="1.2s" begin="${begin}" ${loop}/></g>`
+  }
+  // the whole critter hops: up fast, a moment in the air, down, a beat on the ground
+  s += `<g><animateTransform attributeName="transform" type="translate" values="0 0;0 -14;0 -14;0 0;0 0" keyTimes="0;0.3;0.42;0.7;1" ${ease(4)} dur="${HOP}" ${loop}/>`
+  s += cells(c => !BOTTLE.has(c) && c !== 'K')
+  // happy ^ ^ eyes the whole time
+  s += [[2, 5], [3, 4], [4, 5], [7, 5], [8, 4], [9, 5]].map(([x, y]) => px(x, y, COLORS.K)).join('')
+  // the bottle raised a little in its hand like a trophy, waved from side to side
+  s += `<g transform="translate(0 -5)"><g>`
+  s += `<animateTransform attributeName="transform" type="rotate" values="-14 ${13 * PX} ${7 * PX};14 ${13 * PX} ${7 * PX};-14 ${13 * PX} ${7 * PX}" ${ease(2)} dur="${HOP}" ${loop}/>`
+  s += cells(c => BOTTLE.has(c))
+  s += '</g></g></g>'
+  return { source: s + '</svg>', width: W, height: H }
+}
+
+const PARTY = goalSvg()
 
 // ── Sad critter ("Not yet"): sighs heavily, sinking onto its legs ─
 const SIGH = '3s'
@@ -758,36 +870,62 @@ async function due($: EngineInterface) {
   await ask($, !claimed)
 }
 
-async function answer($: EngineInterface, drank: boolean) {
+// Glasses logged today
+async function drinksToday($: EngineInterface): Promise<number> {
+  const today = dayKey(await $.clock.now())
+  return (await readLog($)).filter(x => x.d && dayKey(x.t) === today).length
+}
+
+// Logs a glass and sets the next question an interval away; true when this
+// glass reached today's goal
+async function drink($: EngineInterface, asks: number): Promise<boolean> {
+  await record($, true, asks)
+  await writeShared($, { answeredAt: await $.clock.now() })
+  await update($, nag, () => 0)
+  await schedule($, intervalMin * MINUTE)
+  return (await drinksToday($)) === goal
+}
+
+// Shows `text` above the prompt with the critter in `feeling`, for a few seconds
+async function showReply($: EngineInterface, text: string, feeling: Mood) {
+  replyTimer?.cancel()
+  await update($, mood, () => feeling)
+  await update($, reply, () => text)
+  replyTimer = $.clock.after(REPLY_MS, () => void update($, reply, () => null))
+}
+
+function goalReply(): string {
+  const cheer = GOAL_REPLIES[Math.floor(Math.random() * GOAL_REPLIES.length)](goal)
+  return isPaused ? cheer : `${cheer} See you in ${minutes(intervalMin)}.`
+}
+
+// `snooze`: for a "not yet", how many minutes until the question comes back
+async function answer($: EngineInterface, drank: boolean, snooze = snoozeMin) {
   await update($, isAsking, () => false)
   replyTimer?.cancel()
   const s = await readShared($)
   if ((s.answeredAt ?? 0) >= askedAtHere) {
     // already answered in another session: don't count it twice
     await update($, nag, () => 0)
-    await update($, mood, () => null)
-    await update($, reply, () => 'Already answered in another session ✓')
     if (!isPaused && typeof s.nextAt === 'number') {
       await arm($, s.nextAt, s.scheduledMs ?? s.nextAt - (await $.clock.now()))
     }
-    replyTimer = $.clock.after(REPLY_MS, () => void update($, reply, () => null))
+    await showReply($, 'Already answered in another session ✓', null)
     return
   }
-  await record($, drank, await read($, nag))
-  await writeShared($, { answeredAt: await $.clock.now() })
   if (drank) {
-    await update($, nag, () => 0)
+    if (await drink($, await read($, nag))) {
+      await showReply($, goalReply(), 'goal')
+      return
+    }
     const cheer = YES_REPLIES[Math.floor(Math.random() * YES_REPLIES.length)]
-    await update($, mood, () => 'happy')
-    await update($, reply, () => (isPaused ? cheer : `${cheer} See you in ${minutes(intervalMin)}.`))
-    await schedule($, intervalMin * MINUTE)
+    await showReply($, isPaused ? cheer : `${cheer} See you in ${minutes(intervalMin)}.`, 'happy')
   } else {
-    await update($, mood, () => 'sad')
-    await update($, reply, () => (isPaused ? 'OK, reminders are paused.' : `OK, I'll check back in ${minutes(snoozeMin)}. ⏳`))
-    await schedule($, snoozeMin * MINUTE)
+    await record($, false, await read($, nag))
+    await writeShared($, { answeredAt: await $.clock.now() })
+    await schedule($, snooze * MINUTE)
+    await showReply($, isPaused ? 'OK, reminders are paused.' : `OK, I'll check back in ${minutes(snooze)}. ⏳`, 'sad')
   }
-  replyTimer?.cancel()
-  replyTimer = $.clock.after(REPLY_MS, () => void update($, reply, () => null))
 }
 
 // Every few seconds: take what the other sessions changed
@@ -956,7 +1094,7 @@ function iconSvg(icon: string, color: string, size: number): string | undefined 
 
 // ── Command output rows ───────────────────────────────────────────
 async function settings($: EngineInterface): Promise<Settings> {
-  return { intervalMin, snoozeMin, goal, quiet: quiet ? quietLabel(quiet) : null, paused: isPaused, muted: await read($, isMuted) }
+  return { intervalMin, snoozeMin, goal, quiet: quiet.length ? quietLabel(quiet) : null, paused: isPaused, muted: await read($, isMuted) }
 }
 
 // Answers a command with `text` (what the model reads, and the fallback row)
@@ -1094,6 +1232,7 @@ async function redrawIfAsking($: EngineInterface) {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'water', description: 'Ask the water question now' })
+    await $.command.register({ name: 'water-drank', description: 'Log a glass of water now and restart the countdown' })
     await $.command.register({ name: 'water-status', description: 'Show the next water reminder and settings' })
     await $.command.register({ name: 'water-pause', description: 'Pause water reminders' })
     await $.command.register({ name: 'water-resume', description: 'Resume water reminders' })
@@ -1104,7 +1243,7 @@ export const register: Register = on => {
     })
     await $.command.register({
       name: 'water-snooze',
-      description: 'Set how long "Not yet" waits, in minutes',
+      description: 'Set how long the first snooze button waits, in minutes (the second waits twice as long)',
       argumentHint: '<minutes>',
     })
     await $.command.register({
@@ -1114,7 +1253,7 @@ export const register: Register = on => {
     })
     await $.command.register({
       name: 'water-quiet',
-      description: 'Set quiet hours with no reminders, e.g. 18:00-09:00, or off',
+      description: 'Set quiet hours with no reminders, e.g. 18:00-09:00 or 10:00-12:00, 20:00-22:00, or off',
       argumentHint: '<from>-<to> | off',
     })
     await $.command.register({
@@ -1247,6 +1386,33 @@ export const register: Register = on => {
     })
   })
 
+  on('command.run', { command: 'water-drank' }, async $ => {
+    // a question on screen: this is its answer
+    if (await read($, isAsking)) {
+      await answer($, true)
+    } else if (await drink($, 0)) {
+      await showReply($, goalReply(), 'goal')
+    }
+    const n = await drinksToday($)
+    const upNext = isPaused ? 'Reminders are paused' : `Next reminder in ${minutes(intervalMin)}`
+    if (n === goal) {
+      return say($, `🎉 Glass logged. Daily goal reached: ${n} of ${goal}!`, {
+        kind: 'line',
+        icon: '🎯',
+        title: `Daily goal reached: ${n} of ${goal} glasses!`,
+        hint: `Glass logged · ${upNext}`,
+        tone: 'blue',
+      })
+    }
+    return say($, `💧 Glass logged: ${n} of ${goal} today. ${upNext}.`, {
+      kind: 'line',
+      icon: '💧',
+      title: `Glass logged: ${n} of ${goal} today`,
+      hint: upNext,
+      tone: 'blue',
+    })
+  })
+
   on('command.run', { command: 'water-goal' }, async ($, e) => {
     const n = Number(e.args.trim())
     if (!Number.isInteger(n) || n < 1 || n > 30) {
@@ -1274,16 +1440,17 @@ export const register: Register = on => {
   on('command.run', { command: 'water-quiet' }, async ($, e) => {
     const args = e.args.trim().toLowerCase()
     if (args === '') {
-      return say($, quiet ? `🌙 Quiet hours: ${quietLabel(quiet)}.` : '🌙 No quiet hours set.', {
+      const isSet = quiet.length > 0
+      return say($, isSet ? `🌙 Quiet hours: ${quietLabel(quiet)}.` : '🌙 No quiet hours set.', {
         kind: 'line',
         icon: '🌙',
-        title: quiet ? `Quiet hours: ${quietLabel(quiet)}` : 'No quiet hours set',
-        hint: quiet ? '/water-quiet off to remove them' : 'e.g. /water-quiet 18:00-09:00',
-        tone: quiet ? 'blue' : 'dim',
+        title: isSet ? `Quiet hours: ${quietLabel(quiet)}` : 'No quiet hours set',
+        hint: isSet ? '/water-quiet off to remove them' : 'e.g. /water-quiet 18:00-09:00 or 10:00-12:00, 20:00-22:00',
+        tone: isSet ? 'blue' : 'dim',
       })
     }
     if (args === 'off') {
-      quiet = null
+      quiet = []
       await saveSettings($)
       return say($, '🌙 Quiet hours off: reminders all day.', {
         kind: 'line',
@@ -1293,19 +1460,19 @@ export const register: Register = on => {
         tone: 'dim',
       })
     }
-    const window = parseQuiet(args)
-    if (!window) {
-      return say($, 'Usage: /water-quiet <from>-<to>, e.g. /water-quiet 18:00-09:00, or /water-quiet off', {
+    const windows = parseQuiet(args)
+    if (!windows) {
+      return say($, `Usage: /water-quiet <from>-<to>[, <from>-<to>...], e.g. /water-quiet 10:00-12:00, 20:00-22:00 (up to ${MAX_WINDOWS}, not the whole day), or /water-quiet off`, {
         kind: 'line',
         icon: '⚠️',
         title: 'Which hours should be quiet?',
-        hint: 'e.g. /water-quiet 18:00-09:00 · /water-quiet 22-7 · /water-quiet off',
+        hint: `e.g. /water-quiet 18:00-09:00 · /water-quiet 10:00-12:00, 20:00-22:00 · up to ${MAX_WINDOWS}, not the whole day · off`,
         tone: 'orange',
       })
     }
-    quiet = window
+    quiet = windows
     await saveSettings($)
-    // a reminder already set inside the new window moves to its end
+    // a reminder already set inside the new windows moves to where they end
     const s = await readShared($)
     const now = await $.clock.now()
     if (!isPaused && typeof s.nextAt === 'number' && isQuiet(s.nextAt)) {
@@ -1313,7 +1480,7 @@ export const register: Register = on => {
       await writeShared($, { nextAt: at, scheduledMs: at - now })
       await arm($, at, at - now)
     }
-    const label = quietLabel(window)
+    const label = quietLabel(windows)
     return say($, `🌙 Quiet hours: ${label}. No reminders then.`, {
       kind: 'line',
       icon: '🌙',
@@ -1467,19 +1634,20 @@ export const register: Register = on => {
         '| Command | What it does |',
         '|---|---|',
         '| `/water` | Ask the water question now |',
+        '| `/water-drank` | Log a glass now and restart the countdown |',
         '| `/water-status` | When the next reminder is due |',
         '| `/water-stats [days]` | Charts and analysis of your history (default 7 days, up to 90) |',
         '| `/water-every <minutes>` | How often to remind |',
-        '| `/water-snooze <minutes>` | How long "Not yet" waits |',
+        '| `/water-snooze <minutes>` | How long the first snooze button waits (the second waits twice as long) |',
         '| `/water-goal <glasses>` | Your daily goal (default 8) |',
-        '| `/water-quiet <from>-<to>` · `off` | No reminders between those times, e.g. 18:00-09:00 |',
+        '| `/water-quiet <from>-<to>, ...` · `off` | No reminders between those times, e.g. 18:00-09:00 or 10:00-12:00, 20:00-22:00 |',
         '| `/water-pause` · `/water-resume` | Stop or restart reminders |',
         '| `/water-mute` · `/water-unmute` | Notification sound off or on |',
         '| `/water-update` | Check for a new version and install it |',
         '| `/water-version` | Version, author and repo |',
         '| `/water-help` | This list |',
         '',
-        `Now: every ${minutes(intervalMin)} · "Not yet" waits ${minutes(snoozeMin)} · goal ${goal} a day · ${quiet ? `quiet ${quietLabel(quiet)}` : 'no quiet hours'} · ${isPaused ? 'paused' : 'running'} · sound ${muted ? 'off' : 'on'}`,
+        `Now: every ${minutes(intervalMin)} · "Not yet" waits ${minutes(snoozeMin)} · goal ${goal} a day · ${quiet.length ? `quiet ${quietLabel(quiet)}` : 'no quiet hours'} · ${isPaused ? 'paused' : 'running'} · sound ${muted ? 'off' : 'on'}`,
       ].join('\n'),
     }
   })
@@ -1603,11 +1771,18 @@ export const register: Register = on => {
     const { Box, Button, Text } = els
     const hasSvg = 'Svg' in els
 
-    // while the reply shows, the critter dances for a drink and sighs at "Not yet"
+    // while the reply shows, the critter dances for a drink (jumps for joy at the goal) and sighs at a snooze
     const feeling = asking ? null : await read($, mood)
-    const pic = feeling === 'happy' ? DANCING : feeling === 'sad' ? SAD : { source: SPRITE_SVG, width: SPRITE_W, height: SPRITE_H }
+    const pic =
+      feeling === 'goal' ? PARTY : feeling === 'happy' ? DANCING : feeling === 'sad' ? SAD : { source: SPRITE_SVG, width: SPRITE_W, height: SPRITE_H }
     const alt =
-      feeling === 'happy' ? 'Claude critter dancing with its water bottle' : feeling === 'sad' ? 'Claude critter sighing sadly' : 'Claude critter holding a water bottle'
+      feeling === 'goal'
+        ? 'Claude critter jumping for joy under confetti for the daily goal'
+        : feeling === 'happy'
+          ? 'Claude critter dancing with its water bottle'
+          : feeling === 'sad'
+            ? 'Claude critter sighing sadly'
+            : 'Claude critter holding a water bottle'
     const critter = hasSvg ? (
       <els.Svg key={feeling ?? 'idle'} source={pic.source} alt={alt} width={pic.width} height={pic.height} isInteractive />
     ) : (
@@ -1636,7 +1811,8 @@ export const register: Register = on => {
             <Text>{ASKS[Math.min(count, ASKS.length) - 1] ?? ASKS[0]}</Text>
             <Box flexDirection="row" gap={1} marginTop={1}>
               <Button key="yes" label="Yes, I drank 💧" variant="primary" onPress={() => answer($, true)} />
-              <Button key="no" label="Not yet" variant="secondary" onPress={() => answer($, false)} />
+              <Button key="snooze" label={`In ${snoozeMin} min`} variant="secondary" onPress={() => answer($, false, snoozeMin)} />
+              <Button key="snooze-long" label={`In ${snoozeMin * 2} min`} variant="secondary" onPress={() => answer($, false, snoozeMin * 2)} />
             </Box>
           </Box>
         ) : (

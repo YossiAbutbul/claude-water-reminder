@@ -2,12 +2,14 @@
 
 A Claude Code plugin that keeps you hydrated. Every hour the Claude critter pops up above the prompt, holding a water bottle, and asks **"Have you drunk water?"**
 
-- **Yes, I drank 💧**: the critter dances, and the next reminder comes in an hour.
-- **Not yet**: the critter lets out a sad sigh, and asks again in 5 minutes, with a slightly more worried message each time, until you say yes.
+- **Yes, I drank 💧**: the critter dances, and the next reminder comes in an hour. The glass that reaches your daily goal gets a victory jump under confetti.
+- **In 5 min** / **In 10 min**: the critter lets out a sad sigh, and asks again after that long, with a slightly more worried message each time, until you say yes.
+
+Drank without being asked? `/water-drank` logs the glass and restarts the countdown.
 
 **Works in the Claude desktop app** (the Code tab) **and in the Claude Code terminal.** In the desktop app the critter is a pixel sprite; in the terminal it's drawn with text characters.
 
-![water-reminder in the Claude desktop app: the reminder, the dancing critter after "Yes", the sighing critter after "Not yet", and the Windows notification](docs/preview.svg)
+![water-reminder in the Claude desktop app: the reminder, the dancing critter after "Yes", the victory jump for the daily goal, the sighing critter after a snooze, and the Windows notification](docs/preview.svg)
 
 On **Windows**, each reminder also shows a system notification with a sound, so you see it even while Claude is minimized.
 
@@ -15,7 +17,7 @@ On **Windows**, each reminder also shows a system notification with a sound, so 
 
 ### Hydration stats
 
-Every answer is logged, and `/water-stats` turns it into a report: the critter takes a swig while you read, glasses per day (the outline on top of a bar is the times you pressed "Not yet"), what hours you drink at, and an "at a glance" panel with your peak hour, best day, streaks and trend. Your rank goes from 🌵 Cactus to 🐋 Blue Whale.
+Every answer is logged, and `/water-stats` turns it into a report: the critter takes a swig while you read, glasses per day (the outline on top of a bar is the times you snoozed), what hours you drink at, and an "at a glance" panel with your peak hour, best day, streaks and trend. Your rank goes from 🌵 Cactus to 🐋 Blue Whale.
 
 ![/water-stats in the Claude desktop app: the drinking critter, daily and hourly charts, and the at-a-glance panel](docs/stats.svg)
 
@@ -37,13 +39,14 @@ Replies use the plugin's own animated icon set, tinted to match the reply and as
 |---|---|
 | `/water` | Ask the water question right now |
 | `/water-status` | Show when the next reminder is due and your settings |
-| `/water-stats [days]` | Chart of drinks vs. "Not yet" per day, your daily rhythm, streaks and a hydration rank (default 7 days) |
+| `/water-stats [days]` | Chart of drinks vs. snoozes per day, your daily rhythm, streaks and a hydration rank (default 7 days) |
 | `/water-pause` | Pause reminders |
 | `/water-resume` | Resume reminders |
 | `/water-every <minutes>` | Remind every N minutes (default 60) |
-| `/water-snooze <minutes>` | How long "Not yet" waits (default 5) |
-| `/water-goal <glasses>` | Your daily goal, used by the stats and the rank (default 8) |
-| `/water-quiet <from>-<to>` | Quiet hours with no reminders, e.g. `/water-quiet 18:00-09:00`. A reminder that would fall inside them waits until they end. `/water-quiet off` removes them |
+| `/water-drank` | Log a glass of water now (when you drank without a reminder) and restart the countdown |
+| `/water-snooze <minutes>` | How long the first snooze button waits (default 5); the second waits twice as long |
+| `/water-goal <glasses>` | Your daily goal, used by the stats, the rank and the goal celebration (default 8) |
+| `/water-quiet <from>-<to>, ...` | Quiet hours with no reminders, e.g. `/water-quiet 18:00-09:00`, or several windows separated by commas, e.g. `/water-quiet 10:00-12:00, 20:00-22:00` (up to 6). A reminder that would fall inside them waits until they end. `/water-quiet off` removes them |
 | `/water-mute` | Turn off the notification sound |
 | `/water-unmute` | Turn the notification sound back on |
 | `/water-help` | List all commands and your current settings |

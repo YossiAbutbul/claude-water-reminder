@@ -1,6 +1,6 @@
 export type Nag = number
 
-export type Mood = 'happy' | 'sad' | null
+export type Mood = 'happy' | 'sad' | 'goal' | null
 
 export type Rank = { emoji: string; name: string; blurb: string }
 

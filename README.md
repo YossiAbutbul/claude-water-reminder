@@ -25,9 +25,9 @@ Every answer is logged, and `/water-stats` turns it into a report: the critter t
 
 ### Status, version and every other command
 
-`/water-status` shows a countdown to the next water break with a progress bar. `/water-version` shows the version, who made it and a link here. The other commands answer with a short line that says what changed.
+`/water-status` shows a countdown to the next water break with a progress bar. `/water-version` shows the version, who made it and a link here. The other commands answer with a short line that says what changed, and `/water-help` lists them all as buttons that put the command in the prompt box.
 
-![/water-status, /water-version and other command replies in the Claude desktop app](docs/commands.svg)
+![/water-status, /water-version, other command replies and the /water-help buttons in the Claude desktop app](docs/commands.svg)
 
 Replies use the plugin's own animated icon set, tinted to match the reply and as tall as it. Each icon keeps moving while it is on screen (the terminal shows emoji instead):
 

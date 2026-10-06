@@ -6,6 +6,7 @@ All notable changes to water-reminder. Versions follow [semantic versioning](htt
 
 ### Changed
 - `/water-help` in the desktop app shows a button for every command: press one to put it in the prompt box, then press Enter (add a value first where it needs one). The terminal keeps the table.
+- The README's commands image shows the `/water-help` buttons, and its status card the new snooze wording.
 - The last "Not yet" wording is gone now that there are two snooze buttons: `/water-status` and `/water-help` say "snooze 5 or 10 min", `/water-snooze` replies with both waits, and the stats say "snoozed".
 
 ## [0.9.1] - 2026-10-06

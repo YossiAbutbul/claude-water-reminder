@@ -313,8 +313,8 @@ function fromShared(v: Window | Window[] | null): Window[] {
 
 function minutes(n: number): string {
   if (n % 60 === 0) {
-    const h = n / 60
-    return h === 1 ? '1 hour' : `${h} hours`
+    const hours = n / 60
+    return hours === 1 ? '1 hour' : `${hours} hours`
   }
   return n === 1 ? '1 minute' : `${n} minutes`
 }
@@ -421,8 +421,8 @@ function dayKey(t: number): string {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
 }
 
-function hourLabel(h: number): string {
-  return `${String(h).padStart(2, '0')}:00`
+function hourLabel(hour: number): string {
+  return `${String(hour).padStart(2, '0')}:00`
 }
 
 function since(min: number): string {
@@ -585,8 +585,8 @@ const FONT = 'font-family="ui-monospace, SFMono-Regular, Consolas, monospace"'
 
 type Pic = { source: string; width: number; height: number }
 
-function svgOpen(w: number, h: number, viewBox = `0 0 ${w} ${h}`): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="${viewBox}" ${FONT} style="background:transparent;color-scheme:light dark">${SVG_TRANSPARENT}`
+function svgOpen(w: number, height: number, viewBox = `0 0 ${w} ${height}`): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${height}" viewBox="${viewBox}" ${FONT} style="background:transparent;color-scheme:light dark">${SVG_TRANSPARENT}`
 }
 
 // ── Drinking critter: lifts the bottle, tilts it to its face, drains it, lowers it
@@ -682,7 +682,7 @@ function danceSvg(): Pic {
 const CONFETTI = [BLUE, ORANGE, '#F2C94C', '#6FCF97', '#EB5757', '#BB86FC']
 
 // Confetti pieces falling through the dance's frame, each on its own beat
-function confetti(w: number, h: number): string {
+function confetti(w: number, height: number): string {
   const loop = 'repeatCount="indefinite"'
   return Array.from({ length: 22 }, (_, i) => {
     // golden-ratio steps spread the pieces evenly across the frame
@@ -693,7 +693,7 @@ function confetti(w: number, h: number): string {
     const [cw, ch] = i % 2 ? [3, 5] : [4, 3]
     return (
       `<rect x="${x}" y="-22" width="${cw}" height="${ch}" fill="${fill}" opacity="0">` +
-      `<animate attributeName="y" values="-22;${h - 26}" dur="${dur}s" begin="${begin}s" ${loop}/>` +
+      `<animate attributeName="y" values="-22;${height - 26}" dur="${dur}s" begin="${begin}s" ${loop}/>` +
       `<animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.1;0.8;1" dur="${dur}s" begin="${begin}s" ${loop}/></rect>`
     )
   }).join('')
@@ -816,13 +816,13 @@ function hourChartSvg(r: Report): Pic {
   const peak = Math.max(1, ...r.hours)
   const base = H - bottom
   let s = svgOpen(W, H)
-  r.hours.forEach((n, h) => {
+  r.hours.forEach((n, hour) => {
     const bh = (n / peak) * (base - 4)
     if (n > 0) {
-      s += `<rect x="${h * slot + slot * 0.3}" y="${base - bh}" width="${slot * 0.4}" height="${bh}" fill="${BLUE}"/>`
+      s += `<rect x="${hour * slot + slot * 0.3}" y="${base - bh}" width="${slot * 0.4}" height="${bh}" fill="${BLUE}"/>`
     }
-    if (h % 6 === 0) {
-      s += `<text x="${h * slot + slot / 2}" y="${H - 4}" text-anchor="middle" font-size="9.5" fill="${INK}">${hourLabel(h).slice(0, 2)}h</text>`
+    if (hour % 6 === 0) {
+      s += `<text x="${hour * slot + slot / 2}" y="${H - 4}" text-anchor="middle" font-size="9.5" fill="${INK}">${hourLabel(hour).slice(0, 2)}h</text>`
     }
   })
   s += `<line x1="0" x2="${W}" y1="${base + 0.5}" y2="${base + 0.5}" stroke="${INK}" stroke-opacity="0.6"/>`
@@ -1716,7 +1716,7 @@ export const register: Register = on => {
         '',
         '| Command | What it does |',
         '|---|---|',
-        ...HELP.map(h => `| \`/${h.cmd}${h.args ? ` ${h.args}` : ''}\` | ${h.about} |`),
+        ...HELP.map(row => `| \`/${row.cmd}${row.args ? ` ${row.args}` : ''}\` | ${row.about} |`),
         '',
         `Now: every ${minutes(intervalMin)} · snooze ${snoozeMin} or ${snoozeMin * 2} min · goal ${goal} a day · ${quiet.length ? `quiet ${quietLabel(quiet)}` : 'no quiet hours'} · ${isPaused ? 'paused' : 'running'} · sound ${muted ? 'off' : 'on'}`,
       ].join('\n'),

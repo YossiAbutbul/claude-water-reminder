@@ -6,7 +6,7 @@
     {
       "name": "water-reminder",
       "source": "./",
-      "description": "The Claude critter asks if you drank water every hour; \"Not yet\" asks again in 5 minutes"
+      "description": "The Claude critter asks every hour if you drank water; snooze it 5 or 10 minutes, log glasses with /water-drank, set quiet hours and see your stats"
     }
   ]
 }

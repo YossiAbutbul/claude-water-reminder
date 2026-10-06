@@ -1,5 +1,4 @@
-import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, Timer } from 'claude-code'
+import type { EngineInterface, PluginState, Register, Timer } from 'claude-code'
 
 import type { DayRow, Mood, Note, Rank, Report, Settings } from '../types'
 
@@ -49,16 +48,75 @@ function encodeCommand(script: string): string {
 }
 
 // ── State ─────────────────────────────────────────────────────────
-const isAsking = atom({ plugin: 'water-reminder', key: 'isAsking' } as const, false)
-const isMuted = atom({ plugin: 'water-reminder', key: 'isMuted' } as const, false)
-const nag = atom({ plugin: 'water-reminder', key: 'nag' } as const, 0)
-const reply = atom({ plugin: 'water-reminder', key: 'reply' } as const, null as string | null)
+// ── Session state ($.state) ───────────────────────────────────────
+// Each value's reference, its default before the first write, and reading and
+// updating it: the latter re-reads and tries again when a write lands between
+type WaterState = PluginState['water-reminder']
+
+const DEFAULTS: WaterState = { isAsking: false, isMuted: false, nag: 0, reply: null, mood: null, reports: {}, notes: {} }
+
+// $.state takes each reference written out, so the values are listed: one case each
+async function stateGet($: EngineInterface, key: keyof WaterState): Promise<{ value: unknown; version: number }> {
+  switch (key) {
+    case 'isAsking':
+      return $.state.get(isAsking)
+    case 'isMuted':
+      return $.state.get(isMuted)
+    case 'nag':
+      return $.state.get(nag)
+    case 'reply':
+      return $.state.get(reply)
+    case 'mood':
+      return $.state.get(mood)
+    case 'reports':
+      return $.state.get(reports)
+    case 'notes':
+      return $.state.get(notes)
+  }
+}
+
+async function stateSet($: EngineInterface, key: keyof WaterState, value: unknown, ifVersion: number): Promise<{ isSet: boolean }> {
+  switch (key) {
+    case 'isAsking':
+      return $.state.set(isAsking, value as WaterState['isAsking'], { ifVersion })
+    case 'isMuted':
+      return $.state.set(isMuted, value as WaterState['isMuted'], { ifVersion })
+    case 'nag':
+      return $.state.set(nag, value as WaterState['nag'], { ifVersion })
+    case 'reply':
+      return $.state.set(reply, value as WaterState['reply'], { ifVersion })
+    case 'mood':
+      return $.state.set(mood, value as WaterState['mood'], { ifVersion })
+    case 'reports':
+      return $.state.set(reports, value as WaterState['reports'], { ifVersion })
+    case 'notes':
+      return $.state.set(notes, value as WaterState['notes'], { ifVersion })
+  }
+}
+
+async function read<K extends keyof WaterState>($: EngineInterface, key: K): Promise<WaterState[K]> {
+  const { value } = await stateGet($, key)
+  return (value ?? DEFAULTS[key]) as WaterState[K]
+}
+
+async function update<K extends keyof WaterState>($: EngineInterface, key: K, fn: (value: WaterState[K]) => WaterState[K]): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const held = await stateGet($, key)
+    const { isSet } = await stateSet($, key, fn((held.value ?? DEFAULTS[key]) as WaterState[K]), held.version)
+    if (isSet) return
+  }
+}
+
+const isAsking = { plugin: 'water-reminder', key: 'isAsking' } as const
+const isMuted = { plugin: 'water-reminder', key: 'isMuted' } as const
+const nag = { plugin: 'water-reminder', key: 'nag' } as const
+const reply = { plugin: 'water-reminder', key: 'reply' } as const
 // How the critter feels while the reply shows: dances on "Yes" (a party for the goal), sad on a snooze
-const mood = atom({ plugin: 'water-reminder', key: 'mood' } as const, null as Mood)
+const mood = { plugin: 'water-reminder', key: 'mood' } as const
 // /water-stats runs this session, by their text
-const reports = atom({ plugin: 'water-reminder', key: 'reports' } as const, {} as Record<string, Report>)
+const reports = { plugin: 'water-reminder', key: 'reports' } as const
 // other water commands' rows, by their text
-const notes = atom({ plugin: 'water-reminder', key: 'notes' } as const, {} as Record<string, Note>)
+const notes = { plugin: 'water-reminder', key: 'notes' } as const
 
 // ── Critter sprite ────────────────────────────────────────────────
 // An interactive Svg is drawn in its own frame; a frame whose colour scheme
@@ -316,7 +374,7 @@ async function writeShared($: EngineInterface, patch: Shared): Promise<Shared> {
 
 // This session's settings, as every session should see them
 async function saveSettings($: EngineInterface) {
-  await writeShared($, { intervalMin, snoozeMin, goal, quiet: toShared(quiet), paused: isPaused, muted: await read($, isMuted) })
+  await writeShared($, { intervalMin, snoozeMin, goal, quiet: toShared(quiet), paused: isPaused, muted: await read($, 'isMuted') })
 }
 
 // Takes another session's settings
@@ -326,8 +384,8 @@ async function applySettings($: EngineInterface, s: Shared) {
   if (typeof s.goal === 'number') goal = s.goal
   if (s.quiet !== undefined) quiet = fromShared(s.quiet)
   isPaused = s.paused === true
-  if ((await read($, isMuted)) !== (s.muted === true)) {
-    await update($, isMuted, () => s.muted === true)
+  if ((await read($, 'isMuted')) !== (s.muted === true)) {
+    await update($, 'isMuted', () => s.muted === true)
   }
 }
 
@@ -827,13 +885,13 @@ async function ask($: EngineInterface, notify: boolean) {
   nextAt = undefined
   replyTimer?.cancel()
   askedAtHere = await $.clock.now()
-  await update($, reply, () => null)
-  await update($, nag, n => n + 1)
-  await update($, isAsking, () => true)
+  await update($, 'reply', () => null)
+  await update($, 'nag', n => n + 1)
+  await update($, 'isAsking', () => true)
   // a write from a timer can miss the band's redraw while a turn is streaming
   $.ui.invalidate('ui.render')
   if (notify) {
-    const script = notifyScript(await read($, isMuted))
+    const script = notifyScript(await read($, 'isMuted'))
     void $.process.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodeCommand(script)]).catch(() => undefined)
   }
 }
@@ -902,7 +960,7 @@ async function drinksToday($: EngineInterface): Promise<number> {
 async function drink($: EngineInterface, asks: number): Promise<boolean> {
   await record($, true, asks)
   await writeShared($, { answeredAt: await $.clock.now() })
-  await update($, nag, () => 0)
+  await update($, 'nag', () => 0)
   await schedule($, intervalMin * MINUTE)
   return (await drinksToday($)) === goal
 }
@@ -910,9 +968,9 @@ async function drink($: EngineInterface, asks: number): Promise<boolean> {
 // Shows `text` above the prompt with the critter in `feeling`, for a few seconds
 async function showReply($: EngineInterface, text: string, feeling: Mood) {
   replyTimer?.cancel()
-  await update($, mood, () => feeling)
-  await update($, reply, () => text)
-  replyTimer = $.clock.after(REPLY_MS, () => void update($, reply, () => null))
+  await update($, 'mood', () => feeling)
+  await update($, 'reply', () => text)
+  replyTimer = $.clock.after(REPLY_MS, () => void update($, 'reply', () => null))
 }
 
 function goalReply(): string {
@@ -922,12 +980,12 @@ function goalReply(): string {
 
 // `snooze`: for a snooze, how many minutes until the question comes back
 async function answer($: EngineInterface, drank: boolean, snooze = snoozeMin) {
-  await update($, isAsking, () => false)
+  await update($, 'isAsking', () => false)
   replyTimer?.cancel()
   const s = await readShared($)
   if ((s.answeredAt ?? 0) >= askedAtHere) {
     // already answered in another session: don't count it twice
-    await update($, nag, () => 0)
+    await update($, 'nag', () => 0)
     if (!isPaused && typeof s.nextAt === 'number') {
       await arm($, s.nextAt, s.scheduledMs ?? s.nextAt - (await $.clock.now()))
     }
@@ -935,14 +993,14 @@ async function answer($: EngineInterface, drank: boolean, snooze = snoozeMin) {
     return
   }
   if (drank) {
-    if (await drink($, await read($, nag))) {
+    if (await drink($, await read($, 'nag'))) {
       await showReply($, goalReply(), 'goal')
       return
     }
     const cheer = YES_REPLIES[Math.floor(Math.random() * YES_REPLIES.length)]
     await showReply($, isPaused ? cheer : `${cheer} See you in ${minutes(intervalMin)}.`, 'happy')
   } else {
-    await record($, false, await read($, nag))
+    await record($, false, await read($, 'nag'))
     await writeShared($, { answeredAt: await $.clock.now() })
     await schedule($, snooze * MINUTE)
     await showReply($, isPaused ? 'OK, reminders are paused.' : `OK, I'll check back in ${minutes(snooze)}. ⏳`, 'sad')
@@ -953,7 +1011,7 @@ async function answer($: EngineInterface, drank: boolean, snooze = snoozeMin) {
 async function sync($: EngineInterface) {
   const s = await readShared($)
   await applySettings($, s)
-  const asking = await read($, isAsking)
+  const asking = await read($, 'isAsking')
   const pending = (s.askedAt ?? 0) > (s.answeredAt ?? 0)
   if (isPaused) {
     timer?.cancel()
@@ -963,15 +1021,15 @@ async function sync($: EngineInterface) {
   }
   if (asking && (s.answeredAt ?? 0) >= askedAtHere) {
     // answered in another session
-    await update($, isAsking, () => false)
-    await update($, nag, () => 0)
+    await update($, 'isAsking', () => false)
+    await update($, 'nag', () => 0)
   } else if (!asking && pending && (s.askedAt ?? 0) > askedAtHere) {
     // asked in another session: show it here too, without a second notification
     await ask($, false)
     askedAtHere = s.askedAt ?? askedAtHere
     return
   }
-  if (!(await read($, isAsking)) && typeof s.nextAt === 'number' && Math.abs(s.nextAt - (nextAt ?? 0)) > SLACK_MS) {
+  if (!(await read($, 'isAsking')) && typeof s.nextAt === 'number' && Math.abs(s.nextAt - (nextAt ?? 0)) > SLACK_MS) {
     await arm($, s.nextAt, s.scheduledMs ?? s.nextAt - (await $.clock.now()))
   }
 }
@@ -987,7 +1045,7 @@ async function startSchedule($: EngineInterface) {
     snoozeMin = typeof storedSnooze === 'number' ? storedSnooze : DEFAULT_SNOOZE_MIN
     isPaused = (await $.store.get('isPaused')) === true
     const storedMuted = (await $.store.get('isMuted')) === true
-    await update($, isMuted, () => storedMuted)
+    await update($, 'isMuted', () => storedMuted)
     await saveSettings($)
     s = await readShared($)
   }
@@ -1119,13 +1177,13 @@ function iconSvg(icon: string, color: string, size: number): string | undefined 
 
 // ── Command output rows ───────────────────────────────────────────
 async function settings($: EngineInterface): Promise<Settings> {
-  return { intervalMin, snoozeMin, goal, quiet: quiet.length ? quietLabel(quiet) : null, paused: isPaused, muted: await read($, isMuted) }
+  return { intervalMin, snoozeMin, goal, quiet: quiet.length ? quietLabel(quiet) : null, paused: isPaused, muted: await read($, 'isMuted') }
 }
 
 // Answers a command with `text` (what the model reads, and the fallback row)
 // and keeps `note` so the row draws styled
 async function say($: EngineInterface, text: string, note: Note) {
-  await update($, notes, all => Object.fromEntries([...Object.entries(all).filter(([t]) => t !== text), [text, note]].slice(-40)))
+  await update($, 'notes', all => Object.fromEntries([...Object.entries(all).filter(([t]) => t !== text), [text, note]].slice(-40)))
   return { text }
 }
 
@@ -1249,7 +1307,7 @@ function drawNote(els: Els, note: Note) {
 }
 
 async function redrawIfAsking($: EngineInterface) {
-  if (await read($, isAsking)) {
+  if (await read($, 'isAsking')) {
     $.ui.invalidate('ui.render')
   }
 }
@@ -1413,7 +1471,7 @@ export const register: Register = on => {
 
   on('command.run', { command: 'water-drank' }, async $ => {
     // a question on screen: this is its answer
-    if (await read($, isAsking)) {
+    if (await read($, 'isAsking')) {
       await answer($, true)
     } else if (await drink($, 0)) {
       await showReply($, goalReply(), 'goal')
@@ -1539,15 +1597,15 @@ export const register: Register = on => {
     const report = buildReport(log, await $.clock.now(), n, goal)
     const text = reportText(report)
     // keep the last few so their rows still draw as cards
-    await update($, reports, all => Object.fromEntries([...Object.entries(all), [text, report]].slice(-20)))
+    await update($, 'reports', all => Object.fromEntries([...Object.entries(all), [text, report]].slice(-20)))
     return { text }
   })
 
   on('ui.render', { component: 'CommandOutput', props: { command: 'water-stats' } }, async ($, e, next) => {
-    const all = await read($, reports)
+    const all = await read($, 'reports')
     const r = all[e.props.text] ?? Object.entries(all).find(([t]) => e.props.text.endsWith(t))?.[1]
     if (!r) {
-      const note = noteFor(await read($, notes), e.props.text)
+      const note = noteFor(await read($, 'notes'), e.props.text)
       return note ? drawNote($.ui.resolve(e), note) : next(e)
     }
 
@@ -1651,7 +1709,7 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'water-help' }, async $ => {
-    const muted = await read($, isMuted)
+    const muted = await read($, 'isMuted')
     return {
       text: [
         '### 💧 Water reminder commands',
@@ -1728,13 +1786,13 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'water-mute' }, async $ => {
-    await update($, isMuted, () => true)
+    await update($, 'isMuted', () => true)
     await saveSettings($)
     return say($, '🔇 Water reminder sound off.', { kind: 'line', icon: '🔇', title: 'Sound off', hint: 'Reminders still pop up, just quietly. /water-unmute to undo', tone: 'dim' })
   })
 
   on('command.run', { command: 'water-unmute' }, async $ => {
-    await update($, isMuted, () => false)
+    await update($, 'isMuted', () => false)
     await saveSettings($)
     return say($, '🔊 Water reminder sound on.', { kind: 'line', icon: '🔊', title: 'Sound on', hint: 'Each reminder plays a chime again', tone: 'blue' })
   })
@@ -1781,7 +1839,7 @@ export const register: Register = on => {
       }
       return 'Markdown' in els ? <els.Markdown key="water-help" text={e.props.text.replace(/^water-reminder: /, "")} /> : next(e)
     }
-    const note = noteFor(await read($, notes), e.props.text)
+    const note = noteFor(await read($, 'notes'), e.props.text)
     return note ? drawNote($.ui.resolve(e), note) : next(e)
   })
 
@@ -1790,20 +1848,20 @@ export const register: Register = on => {
       return next(e)
     }
 
-    const asking = await read($, isAsking)
-    const said = await read($, reply)
+    const asking = await read($, 'isAsking')
+    const said = await read($, 'reply')
     if (!asking && said === null) {
       return next(e)
     }
 
-    const count = await read($, nag)
-    const muted = await read($, isMuted)
+    const count = await read($, 'nag')
+    const muted = await read($, 'isMuted')
     const els = $.ui.resolve(e)
     const { Box, Button, Text } = els
     const hasSvg = 'Svg' in els
 
     // while the reply shows, the critter dances for a drink (jumps for joy at the goal) and sighs at a snooze
-    const feeling = asking ? null : await read($, mood)
+    const feeling = asking ? null : await read($, 'mood')
     const pic =
       feeling === 'goal' ? PARTY : feeling === 'happy' ? DANCING : feeling === 'sad' ? SAD : { source: SPRITE_SVG, width: SPRITE_W, height: SPRITE_H }
     const alt =
@@ -1849,7 +1907,7 @@ export const register: Register = on => {
         ) : (
           <Box flexDirection="row" flexGrow={1} justifyContent="space-between" alignItems="center">
             <Text bold>{said}</Text>
-            <Button key="close" label="Close" role="dismiss" onPress={() => update($, reply, () => null)} />
+            <Button key="close" label="Close" role="dismiss" onPress={() => update($, 'reply', () => null)} />
           </Box>
         )}
       </Box>

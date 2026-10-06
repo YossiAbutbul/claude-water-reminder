@@ -7,6 +7,7 @@ All notable changes to water-reminder. Versions follow [semantic versioning](htt
 ### Fixed
 - The victory jump fits the same frame as the dance, so the card above the prompt keeps its height: a lower hop, the trophy bottle held lower in its hand and the sparkles kept inside.
 - The README's preview image shows the replies' real **Close** button instead of an ✕.
+- The README's commands image shows `/water-drank`.
 
 ## [0.9.0] - 2026-10-06
 

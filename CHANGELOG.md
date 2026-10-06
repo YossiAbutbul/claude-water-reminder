@@ -10,6 +10,7 @@ Readied for the Claude plugin directory: the plugin does nothing new, and says p
 - `/water-update` no longer fetches anything itself: it runs Claude Code's own `claude plugin marketplace update` and `claude plugin update`, and tells from their output whether a newer version was installed. The plugin makes no network requests of its own.
 - The Windows notification runs as plain-text PowerShell (`-Command`), written out at the call in its two forms (with and without sound), instead of an encoded command.
 - The README has a section on what the plugin writes, runs and hooks, and `plugin.json` links to it as the privacy policy. The plugin has an icon, and its description is up to date.
+- `plugin.json` links the homepage, documentation and support (GitHub Issues) for the directory listing.
 
 ### Fixed
 - Code the directory's checks couldn't follow: no name `h` besides JSX's own, session state read and written through the plugin's own functions, and the version and author kept as constants instead of read from `plugin.json` at run time.

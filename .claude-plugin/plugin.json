@@ -4,6 +4,9 @@
   "description": "The Claude critter asks every hour if you drank water; snooze it 5 or 10 minutes, log glasses with /water-drank, set quiet hours and see your stats",
   "author": { "name": "Yossi Abutbul" },
   "repository": "https://github.com/YossiAbutbul/claude-water-reminder",
+  "homepage": "https://github.com/YossiAbutbul/claude-water-reminder",
+  "documentationUrl": "https://github.com/YossiAbutbul/claude-water-reminder#readme",
+  "supportUrl": "https://github.com/YossiAbutbul/claude-water-reminder/issues",
   "license": "MIT",
   "privacyPolicyUrl": "https://github.com/YossiAbutbul/claude-water-reminder#what-the-plugin-does-on-your-computer",
   "types": "./types/index.d.ts"

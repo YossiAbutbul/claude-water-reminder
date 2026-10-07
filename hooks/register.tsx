@@ -1041,7 +1041,7 @@ async function startSchedule($: EngineInterface) {
 // ── Updates ───────────────────────────────────────────────────────
 const PLUGIN_ID = 'water-reminder@claude-water-reminder'
 // This release, as plugin.json states it; bumped with plugin.json at every release
-const VERSION = '0.9.3'
+const VERSION = '0.9.4'
 const AUTHOR = 'Yossi Abutbul'
 const REPO = 'https://github.com/YossiAbutbul/claude-water-reminder'
 const LICENSE = 'MIT'
@@ -1808,6 +1808,11 @@ export const register: Register = on => {
       return next(e)
     }
 
+    // The slot is shared: the app's own drawing and other plugins' bands come from the rest of
+    // the chain and stay under the card, rather than being replaced while the critter asks.
+    const below = await next(e)
+    const isEmpty = !below || (below.type === 'Box' && (below.children ?? []).length === 0)
+
     const count = await read($, 'nag')
     const muted = await read($, 'isMuted')
     const els = $.ui.resolve(e)
@@ -1838,7 +1843,7 @@ export const register: Register = on => {
       </Box>
     )
 
-    return (
+    const card = (
       <Box
         key="water-card"
         flexDirection="row"
@@ -1864,6 +1869,15 @@ export const register: Register = on => {
             <Button key="close" label="Close" role="dismiss" onPress={() => update($, 'reply', () => null)} />
           </Box>
         )}
+      </Box>
+    )
+
+    return isEmpty ? (
+      card
+    ) : (
+      <Box flexDirection="column">
+        {card}
+        {below}
       </Box>
     )
   })

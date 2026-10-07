@@ -2,6 +2,11 @@
 
 All notable changes to water-reminder. Versions follow [semantic versioning](https://semver.org): the version in `.claude-plugin/plugin.json` is what `/water-version` shows and what `/water-update` compares against. Each version is tagged in git (`v0.4.1` and so on).
 
+## [0.9.4] - 2026-10-07
+
+### Fixed
+- While the critter asks or answers, the card no longer replaces what else is drawn above the prompt: the app's own bar and other plugins' bands (such as altshift) stay, under the card.
+
 ## [0.9.3] - 2026-10-06
 
 Readied for the Claude plugin directory: the plugin does nothing new, and says plainly what it does.
@@ -141,6 +146,7 @@ Readied for the Claude plugin directory: the plugin does nothing new, and says p
 - First release: the Claude critter asks "Have you drunk water?" above the prompt every hour, "Not yet" asks again after 5 minutes, and Windows shows a system notification with a sound.
 - `/water`, `/water-status`, `/water-pause`, `/water-resume`, `/water-every`, `/water-snooze`, `/water-mute`, `/water-unmute`.
 
+[0.9.4]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/YossiAbutbul/claude-water-reminder/compare/v0.9.0...v0.9.1
